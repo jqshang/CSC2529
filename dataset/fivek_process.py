@@ -11,8 +11,7 @@ import numpy as np
 import rawpy
 from sklearn.model_selection import train_test_split
 
-from utils import patch_coordinates, bayer_to_rggb 
-
+from utils import patch_coordinates, bayer_to_rggb
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--num_patches", type=int, default=3)
@@ -27,8 +26,8 @@ raw_source_root = "/content/data/fivek_dataset"
 save_folder_root = "/content/data/fivek_dataset_processed/"
 
 model_names = [
-  # "NIKON D700",
-  "Canon EOS 5D",
+    # "NIKON D700",
+    "Canon EOS 5D",
 ]
 raw_file_extensions = [".dng"]
 
@@ -101,9 +100,8 @@ def process_raw_file(raw_object, raw_destination_path, rgb_destination_path):
     h, w, c = rgb_img.shape
     bayer_image = raw_file.raw_image_visible
 
-    rgb_img_shrink = cv2.resize(
-        rgb_img, (w // 2, h // 2), interpolation=cv2.INTER_AREA
-    ).astype(np.uint8)
+    rgb_img_shrink = cv2.resize(rgb_img, (w // 2, h // 2),
+                                interpolation=cv2.INTER_AREA).astype(np.uint8)
 
     r_raw = bayer_image[0::2, 0::2][:, :, np.newaxis]
     g1_raw = bayer_image[0::2, 1::2][:, :, np.newaxis]
@@ -138,9 +136,8 @@ def process_raw_file(raw_object, raw_destination_path, rgb_destination_path):
             dividable_factor=dividable_factor,
             overlap_factor=overlap_factor,
         )
-        for index, (index_x, index_y, x_start, y_start, x_end, y_end) in enumerate(
-            patch_coordinates_list
-        ):
+        for index, (index_x, index_y, x_start, y_start, x_end,
+                    y_end) in enumerate(patch_coordinates_list):
             rggb_img_patch = rggb_img[y_start:y_end, x_start:x_end]
             rgb_img_patch = rgb_img_shrink[y_start:y_end, x_start:x_end]
             raw_file_name = f"{file_name}_{index}.npz"
@@ -158,9 +155,8 @@ def process_raw_file(raw_object, raw_destination_path, rgb_destination_path):
 
             if True:
                 coordinate_filename = f"{file_name}_{index}.txt"
-                coordinate_output_path = os.path.join(
-                    raw_destination_path, coordinate_filename
-                )
+                coordinate_output_path = os.path.join(raw_destination_path,
+                                                      coordinate_filename)
                 with open(coordinate_output_path, "w") as f:
                     f.write(f"{x_start},{y_start},{x_end},{y_end}")
 
@@ -188,9 +184,9 @@ for camera_model in model_names:
     raw_files.sort(key=lambda x: x.raw_path)
     print(f"{len(raw_files)} images")
 
-    train_raw_files, test_raw_files = train_test_split(
-        raw_files, test_size=test_ratio, random_state=seed
-    )
+    train_raw_files, test_raw_files = train_test_split(raw_files,
+                                                       test_size=test_ratio,
+                                                       random_state=seed)
 
     camera_folder_name = camera_model.replace(" ", "_")
 
@@ -205,12 +201,10 @@ for camera_model in model_names:
         destination_folder_name_raw = f"{camera_folder_name}_{split_name}_raw"
         destination_folder_name_rgb = f"{camera_folder_name}_{split_name}_rgb"
 
-        raw_destination_path = os.path.join(
-            save_folder_root, destination_folder_name_raw
-        )
-        rgb_destination_path = os.path.join(
-            save_folder_root, destination_folder_name_rgb
-        )
+        raw_destination_path = os.path.join(save_folder_root,
+                                            destination_folder_name_raw)
+        rgb_destination_path = os.path.join(save_folder_root,
+                                            destination_folder_name_rgb)
 
         os.makedirs(raw_destination_path, exist_ok=True)
         os.makedirs(rgb_destination_path, exist_ok=True)
@@ -234,9 +228,7 @@ for camera_model in model_names:
                 raw_paths, rgb_paths = zip(*results)
         else:
             for raw_file in raw_files_split:
-                raw_path, rgb_path = f(
-                    raw_file,
-                )
+                raw_path, rgb_path = f(raw_file, )
                 raw_paths.append(raw_path)
                 rgb_paths.append(rgb_path)
 
@@ -245,15 +237,16 @@ for camera_model in model_names:
         rgb_paths = [item for sublist in rgb_paths for item in sublist]
 
         raw_paths_rel = [
-            os.path.relpath(raw_path, save_folder_root) for raw_path in raw_paths
+            os.path.relpath(raw_path, save_folder_root)
+            for raw_path in raw_paths
         ]
         rgb_paths_rel = [
-            os.path.relpath(rgb_path, save_folder_root) for rgb_path in rgb_paths
+            os.path.relpath(rgb_path, save_folder_root)
+            for rgb_path in rgb_paths
         ]
 
-        csv_path = os.path.join(
-            save_folder_root, f"{camera_folder_name}_{split_name}.txt"
-        )
+        csv_path = os.path.join(save_folder_root,
+                                f"{camera_folder_name}_{split_name}.txt")
         if not dry_run:
             with open(csv_path, "w") as f:
                 for raw_path, rgb_path in zip(raw_paths_rel, rgb_paths_rel):
