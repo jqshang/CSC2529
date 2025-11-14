@@ -1,6 +1,7 @@
 import numpy as np
 import math
 
+
 def bayer_to_rggb(data):
     red, green_red, green_blue, blue = (
         data[0::2, 0::2],
