@@ -11,19 +11,21 @@ import numpy as np
 import rawpy
 from sklearn.model_selection import train_test_split
 
-from utils import patch_coordinates, bayer_to_rggb
+from utils.utils import patch_coordinates, bayer_to_rggb
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--num_patches", type=int, default=3)
 parser.add_argument("--dividable_factor", type=int, default=32)
 parser.add_argument("--overlap", default=False, action="store_true")
 parser.add_argument("--skip_train", default=False, action="store_true")
+parser.add_argument("--raw_source_root", type=str, required=True)
+parser.add_argument("--save_folder_root", type=str, required=True)
 
 args = parser.parse_args()
 
 ################################################################
-raw_source_root = "/content/data/fivek_dataset"
-save_folder_root = "/content/data/fivek_dataset_processed/"
+raw_source_root = args.raw_source_root
+save_folder_root = args.save_folder_root
 
 model_names = [
     # "NIKON D700",
