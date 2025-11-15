@@ -32,7 +32,7 @@ save_folder_root = args.save_folder_root
 #     "Canon EOS 5D",
 # ]
 
-model_names = ['Canon EOS 10D', 'Canon EOS 20D', 'Canon EOS 30D', 'Canon EOS 40D', 'Canon EOS 5D', 'Canon EOS 5D Mark II', 'Canon EOS D30', 'Canon EOS D60', 'Canon EOS DIGITAL REBEL XSi', 'Canon EOS DIGITAL REBEL XT', 'Canon EOS DIGITAL REBEL XTi', 'Canon EOS-1D Mark II', 'Canon EOS-1D Mark II N', 'Canon EOS-1D Mark III', 'Canon EOS-1Ds Mark II', 'Canon PowerShot G10', 'Canon PowerShot G9', 'Canon PowerShot S70', 'D-LUX 3', 'DCS460D         FILE VERSION 3', 'DSLR-A900', 'FinePixS2Pro', 'M8 Digital Camera', 'NIKON D100', 'NIKON D200', 'NIKON D2H', 'NIKON D300', 'NIKON D40X', 'NIKON D70', 'NIKON D700', 'NIKON D70s', 'NIKON D80']
+model_names = ['Canon EOS 10D', 'Canon EOS 20D', 'Canon EOS 30D', 'Canon EOS 40D', 'Canon EOS 5D', 'Canon EOS 5D Mark II', 'Canon EOS D30', 'Canon EOS D60', 'Canon EOS DIGITAL REBEL XSi', 'Canon EOS DIGITAL REBEL XT', 'Canon EOS DIGITAL REBEL XTi', 'Canon EOS-1D Mark II', 'Canon EOS-1D Mark III', 'Canon EOS-1Ds Mark II', 'Canon PowerShot G10', 'Canon PowerShot G9', 'Canon PowerShot S70', 'D-LUX 3', 'DCS460D         FILE VERSION 3', 'DSLR-A900', 'FinePixS2Pro', 'M8 Digital Camera', 'NIKON D100', 'NIKON D200', 'NIKON D2H', 'NIKON D300', 'NIKON D40X', 'NIKON D70', 'NIKON D700', 'NIKON D70s', 'NIKON D80']
 
 # Folder containing processed data
 processed_root = os.path.join(save_folder_root, "fivek_patches_3")
