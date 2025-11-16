@@ -57,7 +57,9 @@ def create_dataset(
 
     if max_items is not None:
         name, ext = os.path.splitext(file_list)
-        file_list = f"{name}_{max_items}_{seed}{ext}"
+        
+        # file_list = f"{name}_{max_items}_{seed}{ext}"
+        file_list = f"{name}{ext}"
 
     if "fivek" in dataset_folder_name:
         dataset = RAWImageDataset(
