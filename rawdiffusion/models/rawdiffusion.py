@@ -296,18 +296,16 @@ class RAWDiffusionModel(nn.Module):
         emb = self.time_embed(
             timestep_embedding(timesteps, self.model_channels))
 
+        # Frozen Encoder
         h = x.type(self.dtype)
-        for idx, block in enumerate(self.input_blocks):
+        for block in self.input_blocks:
             if self.use_film:
                 h = block(h, guidance_features, emb, cond)
             else:
                 h = block(h, guidance_features, emb)
-
-            if control_input_res is not None:
-                h = h + controlnet_scale * control_input_res[idx]
-
             hs.append(h)
 
+        # Bottleneck
         if self.use_film:
             h = self.middle_block(h, guidance_features, emb, cond)
         else:
@@ -316,8 +314,23 @@ class RAWDiffusionModel(nn.Module):
         if control_middle_res is not None:
             h = h + controlnet_scale * control_middle_res
 
+        # Decoder
+        if control_input_res is not None:
+            # sanity: same number of encoder activations and control features
+            assert len(control_input_res) == len(hs)
+            control_idx = len(control_input_res) - 1
+        else:
+            control_idx = None
+
         for block in self.output_blocks:
-            h = th.cat([h, hs.pop()], dim=1)
+            skip = hs.pop()
+
+            if control_idx is not None:
+                skip = skip + controlnet_scale * control_input_res[control_idx]
+                control_idx -= 1
+
+            h = th.cat([h, skip], dim=1)
+
             if self.use_film:
                 h = block(h, guidance_features, emb, cond)
             else:

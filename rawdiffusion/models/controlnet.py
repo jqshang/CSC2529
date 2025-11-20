@@ -148,8 +148,6 @@ class RAWControlNet(nn.Module):
             normalization_fn=self.normalization_fn,
         )
 
-        self._feature_size = ch
-        input_block_chans = [ch]
         ds = 1
         for level, mult in enumerate(channel_mult):
             for _ in range(num_res_blocks):
@@ -167,8 +165,6 @@ class RAWControlNet(nn.Module):
                 self.input_zero_convs.append(
                     zero_module(conv_nd(dims, ch, ch, 1)))
 
-                self._feature_size += ch
-                input_block_chans.append(ch)
             if level != len(channel_mult) - 1:
                 out_ch = ch
                 self.input_blocks.append(
@@ -184,9 +180,7 @@ class RAWControlNet(nn.Module):
                     zero_module(conv_nd(dims, out_ch, out_ch, 1)))
 
                 ch = out_ch
-                input_block_chans.append(ch)
                 ds *= 2
-                self._feature_size += ch
 
         self.middle_block = TimestepEmbedSequential(
             resblock_guidance(ch, ),
@@ -194,7 +188,6 @@ class RAWControlNet(nn.Module):
             resblock_guidance(ch, ),
         )
         self.middle_zero_conv = zero_module(conv_nd(dims, ch, ch, 1))
-        self._feature_size += ch
 
     def forward(self, x, timesteps, guidance_features, cond=None):
         """
