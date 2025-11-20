@@ -251,6 +251,10 @@ class RAWDiffusionModel(nn.Module):
                         padding_mode="reflect")),
         )
 
+    def freeze_backbone(self):
+        for p in self.parameters():
+            p.requires_grad_(False)
+
     def forward(
         self,
         x,
