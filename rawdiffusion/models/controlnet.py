@@ -6,7 +6,6 @@ from .nn import SiLU, conv_nd, linear, zero_module, timestep_embedding, normaliz
 from .residual_blocks import (
     ResBlock,
     Downsample,
-    Upsample,
     TimestepEmbedSequential,
 )
 from .attention_blocks import AttentionBlock
@@ -229,6 +228,9 @@ class RAWControlNet(nn.Module):
         else:
             h = self.middle_block(h, guidance_features, emb)
 
-        out = self.middle_zero_conv(h)
+        middle_block_res = self.middle_zero_conv(h)
 
-        return out
+        return {
+            "input_block_res": hs,
+            "middle_block_res": middle_block_res,
+        }

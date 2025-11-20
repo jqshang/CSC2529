@@ -11,6 +11,7 @@ from .residual_blocks import (
 )
 from .attention_blocks import AttentionBlock
 from functools import partial
+from rawdiffusion.models.controlnet import RAWControlNet
 
 
 class RAWDiffusionModel(nn.Module):
@@ -250,7 +251,15 @@ class RAWDiffusionModel(nn.Module):
                         padding_mode="reflect")),
         )
 
-    def forward(self, x, timesteps, guidance_data, cond=None):
+    def forward(
+        self,
+        x,
+        timesteps,
+        guidance_data,
+        cond=None,
+        controlnet=None,
+        controlnet_scale: float = 1.0,
+    ):
 
         if self.use_film and cond is None:
             raise ValueError(
@@ -271,22 +280,41 @@ class RAWDiffusionModel(nn.Module):
         else:
             guidance_features = None
 
+        control_input_res = None
+        control_middle_res = None
+        if controlnet is not None:
+            control_out = controlnet(
+                x=x,
+                timesteps=timesteps,
+                guidance_features=guidance_features,
+                cond=cond,
+            )
+            control_input_res = control_out["input_block_res"]
+            control_middle_res = control_out["middle_block_res"]
+
         hs = []
         emb = self.time_embed(
             timestep_embedding(timesteps, self.model_channels))
 
         h = x.type(self.dtype)
-        for block in self.input_blocks:
+        for idx, block in enumerate(self.input_blocks):
             if self.use_film:
                 h = block(h, guidance_features, emb, cond)
             else:
                 h = block(h, guidance_features, emb)
+
+            if control_input_res is not None:
+                h = h + controlnet_scale * control_input_res[idx]
+
             hs.append(h)
 
         if self.use_film:
             h = self.middle_block(h, guidance_features, emb, cond)
         else:
             h = self.middle_block(h, guidance_features, emb)
+
+        if control_middle_res is not None:
+            h = h + controlnet_scale * control_middle_res
 
         for block in self.output_blocks:
             h = th.cat([h, hs.pop()], dim=1)
