@@ -14,6 +14,7 @@ from functools import partial
 
 
 class RAWDiffusionModel(nn.Module):
+
     def __init__(
         self,
         image_size,
@@ -41,6 +42,8 @@ class RAWDiffusionModel(nn.Module):
         conditional_block_name="RGBGuidedResidualBlock",
         norm_num_groups=8,
         latent_drop_rate=0,
+        use_film=False,
+        cond_channels=None,
     ):
         super().__init__()
 
@@ -67,12 +70,17 @@ class RAWDiffusionModel(nn.Module):
         self.num_heads_upsample = num_heads_upsample
         self.out_tanh = out_tanh
 
-        self.normalization_fn = partial(normalization, num_groups=norm_num_groups)
+        self.normalization_fn = partial(normalization,
+                                        num_groups=norm_num_groups)
+
+        self.use_film = use_film
+        self.cond_channels = cond_channels
+        if self.use_film and self.cond_channels is None:
+            raise ValueError("use_film=True but cond_channels is None. ")
 
         if rgb_guidance_module:
             self.rgb_guidance_module = rgb_guidance_module(
-                normalization_fn=self.normalization_fn
-            )
+                normalization_fn=self.normalization_fn)
         else:
             self.rgb_guidance_module = None
 
@@ -84,13 +92,15 @@ class RAWDiffusionModel(nn.Module):
         )
 
         ch = input_ch = int(channel_mult[0] * model_channels)
-        self.input_blocks = nn.ModuleList(
-            [
-                TimestepEmbedSequential(
-                    conv_nd(dims, in_channels, ch, 3, padding=1, padding_mode="reflect")
-                )
-            ]
-        )
+        self.input_blocks = nn.ModuleList([
+            TimestepEmbedSequential(
+                conv_nd(dims,
+                        in_channels,
+                        ch,
+                        3,
+                        padding=1,
+                        padding_mode="reflect"))
+        ])
 
         self.latent_drop_rate = latent_drop_rate
 
@@ -99,8 +109,12 @@ class RAWDiffusionModel(nn.Module):
         else:
             self.mask_token = None
 
-        resblock_standard = partial(
-            ResBlock,
+        if self.use_film:
+            from .residual_blocks import FiLMResidualBlock as BaseResBlock
+        else:
+            BaseResBlock = ResBlock
+
+        base_resblock_kwargs = dict(
             emb_channels=time_embed_dim,
             dropout=dropout,
             dims=dims,
@@ -109,16 +123,26 @@ class RAWDiffusionModel(nn.Module):
             normalization_fn=self.normalization_fn,
         )
 
+        if self.use_film:
+            base_resblock_kwargs["cond_channels"] = cond_channels
+
+        resblock_standard = partial(
+            BaseResBlock,
+            **base_resblock_kwargs,
+        )
+
         if conditional_block_name == "RGBGuidedResidualBlock":
             from rawdiffusion.models.residual_blocks import RGBGuidedResidualBlock
-
             resblock_guidance_cls = partial(RGBGuidedResidualBlock)
+            guidance_extra_kwargs = {}
         elif conditional_block_name == "ResBlock":
             resblock_guidance_cls = ResBlock
+            guidance_extra_kwargs = {}
+            if self.use_film:
+                guidance_extra_kwargs["cond_channels"] = cond_channels
         else:
             raise ValueError(
-                f"Unknown conditional block name: {conditional_block_name}"
-            )
+                f"Unknown conditional block name: {conditional_block_name}")
 
         resblock_guidance = partial(
             resblock_guidance_cls,
@@ -129,6 +153,7 @@ class RAWDiffusionModel(nn.Module):
             use_checkpoint=use_checkpoint,
             use_scale_shift_norm=use_scale_shift_norm,
             normalization_fn=self.normalization_fn,
+            **guidance_extra_kwargs,
         )
 
         attention = partial(
@@ -162,11 +187,7 @@ class RAWDiffusionModel(nn.Module):
                 ]
                 ch = int(mult * model_channels)
                 if ds in self.attention_resolutions_ds:
-                    layers.append(
-                        attention(
-                            ch,
-                        )
-                    )
+                    layers.append(attention(ch, ))
                 self.input_blocks.append(TimestepEmbedSequential(*layers))
                 self._feature_size += ch
                 input_block_chans.append(ch)
@@ -178,12 +199,8 @@ class RAWDiffusionModel(nn.Module):
                             ch,
                             out_channels=out_ch,
                             down=True,
-                        )
-                        if resblock_updown
-                        else Downsample(
-                            ch, conv_resample, dims=dims, out_channels=out_ch
-                        )
-                    )
+                        ) if resblock_updown else Downsample(
+                            ch, conv_resample, dims=dims, out_channels=out_ch))
                 )
                 ch = out_ch
                 input_block_chans.append(ch)
@@ -191,13 +208,9 @@ class RAWDiffusionModel(nn.Module):
                 self._feature_size += ch
 
         self.middle_block = TimestepEmbedSequential(
-            resblock_guidance(
-                ch,
-            ),
+            resblock_guidance(ch, ),
             (attention(ch) if mid_attention else nn.Identity()),
-            resblock_guidance(
-                ch,
-            ),
+            resblock_guidance(ch, ),
         )
         self._feature_size += ch
 
@@ -213,11 +226,7 @@ class RAWDiffusionModel(nn.Module):
                 ]
                 ch = int(model_channels * mult)
                 if ds in self.attention_resolutions_ds:
-                    layers.append(
-                        attention_upsamle(
-                            ch,
-                        )
-                    )
+                    layers.append(attention_upsamle(ch, ))
                 if level and i == num_res_blocks:
                     out_ch = ch
                     layers.append(
@@ -225,10 +234,8 @@ class RAWDiffusionModel(nn.Module):
                             ch,
                             out_channels=out_ch,
                             up=True,
-                        )
-                        if resblock_updown
-                        else Upsample(ch, conv_resample, dims=dims, out_channels=out_ch)
-                    )
+                        ) if resblock_updown else Upsample(
+                            ch, conv_resample, dims=dims, out_channels=out_ch))
                     ds //= 2
                 self.output_blocks.append(TimestepEmbedSequential(*layers))
                 self._feature_size += ch
@@ -237,40 +244,63 @@ class RAWDiffusionModel(nn.Module):
             self.normalization_fn(ch),
             SiLU(),
             zero_module(
-                conv_nd(
-                    dims, input_ch, out_channels, 3, padding=1, padding_mode="reflect"
-                )
-            ),
+                conv_nd(dims,
+                        input_ch,
+                        out_channels,
+                        3,
+                        padding=1,
+                        padding_mode="reflect")),
         )
 
-    def forward(self, x, timesteps, guidance_data):
+    def forward(self, x, timesteps, guidance_data, cond=None):
+
+        if self.use_film and cond is None:
+            raise ValueError(
+                "RAWDiffusionModel is configured with use_film=True, but no cond was passed to forward()."
+            )
+
         if self.rgb_guidance_module is not None:
             guidance_features = self.rgb_guidance_module(guidance_data)
 
             if self.training and self.latent_drop_rate > 0:
                 bs = guidance_features.shape[0]
-                mask = (
-                    torch.rand(bs, 1, 1, 1, device=guidance_features.device)
-                    < self.latent_drop_rate
-                ).float()
+                mask = (torch.rand(bs,
+                                   1,
+                                   1,
+                                   1,
+                                   device=guidance_features.device)
+                        < self.latent_drop_rate).float()
 
                 mask_token = self.mask_token[None, :, None, None]
-                guidance_features = guidance_features * (1 - mask) + mask_token * mask
+                guidance_features = guidance_features * (
+                    1 - mask) + mask_token * mask
         else:
             guidance_features = None
 
         hs = []
-        emb = self.time_embed(timestep_embedding(timesteps, self.model_channels))
+        emb = self.time_embed(
+            timestep_embedding(timesteps, self.model_channels))
 
         h = x.type(self.dtype)
         for block in self.input_blocks:
-            h = block(h, guidance_features, emb)
+            if self.use_film:
+                h = block(h, guidance_features, emb, cond)
+            else:
+                h = block(h, guidance_features, emb)
             hs.append(h)
-        h = self.middle_block(h, guidance_features, emb)
+
+        if self.use_film:
+            h = self.middle_block(h, guidance_features, emb, cond)
+        else:
+            h = self.middle_block(h, guidance_features, emb)
 
         for block in self.output_blocks:
             h = th.cat([h, hs.pop()], dim=1)
-            h = block(h, guidance_features, emb)
+            if self.use_film:
+                h = block(h, guidance_features, emb, cond)
+            else:
+                h = block(h, guidance_features, emb)
+
         h = h.type(x.dtype)
         out = self.out(h)
 
