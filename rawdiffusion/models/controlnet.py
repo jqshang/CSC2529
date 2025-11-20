@@ -13,16 +13,14 @@ from .attention_blocks import AttentionBlock
 from functools import partial
 
 
-class RAWDiffusionModel(nn.Module):
+class RAWControlNet(nn.Module):
 
     def __init__(
         self,
         image_size,
         in_channels,
         model_channels,
-        out_channels,
         num_res_blocks,
-        rgb_guidance_module,
         attention_resolutions,
         dropout=0,
         channel_mult=(1, 2, 4, 8),
@@ -38,10 +36,8 @@ class RAWDiffusionModel(nn.Module):
         resblock_updown=False,
         use_new_attention_order=False,
         mid_attention=True,
-        out_tanh=False,
         conditional_block_name="RGBGuidedResidualBlock",
         norm_num_groups=8,
-        latent_drop_rate=0,
         use_film=False,
         cond_channels=None,
     ):
@@ -56,7 +52,6 @@ class RAWDiffusionModel(nn.Module):
 
         self.in_channels = in_channels
         self.model_channels = model_channels
-        self.out_channels = out_channels
         self.num_res_blocks = num_res_blocks
         self.attention_resolutions_ds = attention_resolutions_ds
         self.dropout = dropout
@@ -68,22 +63,17 @@ class RAWDiffusionModel(nn.Module):
         self.num_heads = num_heads
         self.num_head_channels = num_head_channels
         self.num_heads_upsample = num_heads_upsample
-        self.out_tanh = out_tanh
 
-        self.normalization_fn = partial(normalization,
-                                        num_groups=norm_num_groups)
+        self.normalization_fn = partial(
+            normalization,
+            num_groups=norm_num_groups,
+        )
 
         self.use_film = use_film
         self.cond_channels = cond_channels
         if self.use_film and self.cond_channels is None:
             raise ValueError(
-                "RAWDiffusionModel: use_film=True but cond_channels is None. ")
-
-        if rgb_guidance_module:
-            self.rgb_guidance_module = rgb_guidance_module(
-                normalization_fn=self.normalization_fn)
-        else:
-            self.rgb_guidance_module = None
+                "RAWControlNet: use_film=True but cond_channels is None. ")
 
         time_embed_dim = model_channels * 4
         self.time_embed = nn.Sequential(
@@ -92,7 +82,7 @@ class RAWDiffusionModel(nn.Module):
             linear(time_embed_dim, time_embed_dim),
         )
 
-        ch = input_ch = int(channel_mult[0] * model_channels)
+        ch = int(channel_mult[0] * model_channels)
         self.input_blocks = nn.ModuleList([
             TimestepEmbedSequential(
                 conv_nd(dims,
@@ -103,12 +93,8 @@ class RAWDiffusionModel(nn.Module):
                         padding_mode="reflect"))
         ])
 
-        self.latent_drop_rate = latent_drop_rate
-
-        if latent_drop_rate > 0:
-            self.mask_token = th.nn.Parameter(th.randn(c_channels))
-        else:
-            self.mask_token = None
+        self.input_zero_convs = nn.ModuleList(
+            [zero_module(conv_nd(dims, ch, ch, 1))])
 
         if self.use_film:
             from .residual_blocks import FiLMResidualBlock as BaseResBlock
@@ -163,15 +149,6 @@ class RAWDiffusionModel(nn.Module):
             normalization_fn=self.normalization_fn,
         )
 
-        attention_upsamle = partial(
-            AttentionBlock,
-            use_checkpoint=use_checkpoint,
-            num_heads=num_heads_upsample,
-            num_head_channels=num_head_channels,
-            use_new_attention_order=use_new_attention_order,
-            normalization_fn=self.normalization_fn,
-        )
-
         self._feature_size = ch
         input_block_chans = [ch]
         ds = 1
@@ -186,7 +163,11 @@ class RAWDiffusionModel(nn.Module):
                 ch = int(mult * model_channels)
                 if ds in self.attention_resolutions_ds:
                     layers.append(attention(ch, ))
+
                 self.input_blocks.append(TimestepEmbedSequential(*layers))
+                self.input_zero_convs.append(
+                    zero_module(conv_nd(dims, ch, ch, 1)))
+
                 self._feature_size += ch
                 input_block_chans.append(ch)
             if level != len(channel_mult) - 1:
@@ -200,6 +181,9 @@ class RAWDiffusionModel(nn.Module):
                         ) if resblock_updown else Downsample(
                             ch, conv_resample, dims=dims, out_channels=out_ch))
                 )
+                self.input_zero_convs.append(
+                    zero_module(conv_nd(dims, out_ch, out_ch, 1)))
+
                 ch = out_ch
                 input_block_chans.append(ch)
                 ds *= 2
@@ -210,95 +194,41 @@ class RAWDiffusionModel(nn.Module):
             (attention(ch) if mid_attention else nn.Identity()),
             resblock_guidance(ch, ),
         )
+        self.middle_zero_conv = zero_module(conv_nd(dims, ch, ch, 1))
         self._feature_size += ch
 
-        self.output_blocks = nn.ModuleList([])
-        for level, mult in list(enumerate(channel_mult))[::-1]:
-            for i in range(num_res_blocks + 1):
-                ich = input_block_chans.pop()
-                layers = [
-                    resblock_guidance(
-                        ch + ich,
-                        out_channels=int(model_channels * mult),
-                    )
-                ]
-                ch = int(model_channels * mult)
-                if ds in self.attention_resolutions_ds:
-                    layers.append(attention_upsamle(ch, ))
-                if level and i == num_res_blocks:
-                    out_ch = ch
-                    layers.append(
-                        resblock_guidance(
-                            ch,
-                            out_channels=out_ch,
-                            up=True,
-                        ) if resblock_updown else Upsample(
-                            ch, conv_resample, dims=dims, out_channels=out_ch))
-                    ds //= 2
-                self.output_blocks.append(TimestepEmbedSequential(*layers))
-                self._feature_size += ch
-
-        self.out = nn.Sequential(
-            self.normalization_fn(ch),
-            SiLU(),
-            zero_module(
-                conv_nd(dims,
-                        input_ch,
-                        out_channels,
-                        3,
-                        padding=1,
-                        padding_mode="reflect")),
-        )
-
-    def forward(self, x, timesteps, guidance_data, cond=None):
+    def forward(self, x, timesteps, guidance_features, cond=None):
+        """
+        Args:
+            x:                [B, in_channels, H, W] noisy RGB input (same as RAWDiffusion).
+            timesteps:        [B] diffusion timesteps.
+            guidance_features:[B, c_channels, H, W] output of frozen rgb_guidance_module.
+                               (Already computed once and shared with RAWDiffusionModel.)
+            cond:             [B, cond_channels] FiLM condition vector if use_film=True.
+        """
 
         if self.use_film and cond is None:
             raise ValueError(
-                "RAWDiffusionModel is configured with use_film=True, but no cond was passed to forward()."
+                "RAWControlNet is configured with use_film=True, but no cond was passed to forward()."
             )
-
-        if self.rgb_guidance_module is not None:
-            guidance_features = self.rgb_guidance_module(guidance_data)
-
-            if self.training and self.latent_drop_rate > 0:
-                bs = guidance_features.shape[0]
-                mask = (th.rand(bs, 1, 1, 1, device=guidance_features.device)
-                        < self.latent_drop_rate).float()
-
-                mask_token = self.mask_token[None, :, None, None]
-                guidance_features = guidance_features * (
-                    1 - mask) + mask_token * mask
-        else:
-            guidance_features = None
 
         hs = []
         emb = self.time_embed(
             timestep_embedding(timesteps, self.model_channels))
 
         h = x.type(self.dtype)
-        for block in self.input_blocks:
+        for block, zero_conv in zip(self.input_blocks, self.input_zero_convs):
             if self.use_film:
                 h = block(h, guidance_features, emb, cond)
             else:
                 h = block(h, guidance_features, emb)
-            hs.append(h)
+            hs.append(zero_conv(h))
 
         if self.use_film:
             h = self.middle_block(h, guidance_features, emb, cond)
         else:
             h = self.middle_block(h, guidance_features, emb)
 
-        for block in self.output_blocks:
-            h = th.cat([h, hs.pop()], dim=1)
-            if self.use_film:
-                h = block(h, guidance_features, emb, cond)
-            else:
-                h = block(h, guidance_features, emb)
-
-        h = h.type(x.dtype)
-        out = self.out(h)
-
-        if self.out_tanh:
-            out = th.tanh(out)
+        out = self.middle_zero_conv(h)
 
         return out
