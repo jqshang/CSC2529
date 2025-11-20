@@ -6,7 +6,7 @@ import lightning.pytorch as pl
 import lightning.pytorch.callbacks as callbacks
 import torch
 import torch.optim.lr_scheduler as lr_scheduler
-from aim.pytorch_lightning import AimLogger
+from lightning.pytorch.loggers import CSVLogger
 from hydra.utils import instantiate
 from lightning.pytorch.core import LightningModule
 from omegaconf import DictConfig, OmegaConf
@@ -14,6 +14,7 @@ from torch.optim import AdamW
 from torchinfo import summary
 from torchvision.transforms.functional import to_pil_image
 from torchvision.utils import make_grid
+import json
 
 from rawdiffusion.datasets.dataset_factory import create_dataset
 from rawdiffusion.evaluation.collection import CollectionMetric
@@ -25,14 +26,14 @@ from rawdiffusion.evaluation.metrics import (
 )
 from rawdiffusion.resample import create_named_schedule_sampler
 from rawdiffusion.gaussian_diffusion_factory import (
-    create_gaussian_diffusion,
-)
+    create_gaussian_diffusion, )
 from rawdiffusion.utils import get_output_path
 from rawdiffusion.config import mod_config
 from rawdiffusion.utils import rggb_to_rgb
 
 
 class RAWDiffusionModule(LightningModule):
+
     def __init__(self, experiment_folder, **hparams) -> None:
         super().__init__()
 
@@ -45,16 +46,16 @@ class RAWDiffusionModule(LightningModule):
 
         self.model = instantiate(self.params.model, image_size=image_size)
         self.diffusion = create_gaussian_diffusion(**self.params.diffusion)
-        self.diffusion_val = create_gaussian_diffusion(**self.params.diffusion_val)
+        self.diffusion_val = create_gaussian_diffusion(
+            **self.params.diffusion_val)
         self.schedule_sampler = create_named_schedule_sampler(
-            self.params.general.schedule_sampler, self.diffusion
-        )
+            self.params.general.schedule_sampler, self.diffusion)
 
         summary(
             self.model,
             input_size=[
                 (1, in_channels, image_size, image_size),
-                (1,),
+                (1, ),
                 (1, 3, image_size, image_size),
             ],
             depth=2,
@@ -64,12 +65,14 @@ class RAWDiffusionModule(LightningModule):
         return (x + 1) / 2.0
 
     def setup(self, stage: str) -> None:
-        self.logger.experiment["hparams"] = self.params
+        if self.logger is not None:
+            hp = OmegaConf.to_container(self.params, resolve=True)
+            self.logger.log_hyperparams(hp)
 
     def forward_step(self, input_data, guidance_input, sampling_seed=None):
-        t, weights = self.schedule_sampler.sample(
-            input_data.shape[0], self.device, seed=sampling_seed
-        )
+        t, weights = self.schedule_sampler.sample(input_data.shape[0],
+                                                  self.device,
+                                                  seed=sampling_seed)
 
         losses, extra = self.diffusion.training_losses(
             self.model,
@@ -94,9 +97,12 @@ class RAWDiffusionModule(LightningModule):
 
         loss, extra, metrics = self.forward_step(input_data, guidance_input)
 
-        self.log(
-            "train_loss", loss, on_step=True, on_epoch=True, prog_bar=True, logger=True
-        )
+        self.log("train_loss",
+                 loss,
+                 on_step=True,
+                 on_epoch=True,
+                 prog_bar=True,
+                 logger=True)
 
         for k, v in metrics.items():
             self.log(
@@ -108,37 +114,40 @@ class RAWDiffusionModule(LightningModule):
                 logger=True,
             )
 
-        if (
-            self.global_step % self.params.general.log_train_images_interval == 0
-            and self.global_step >= 0
-        ):
+        if (self.global_step % self.params.general.log_train_images_interval
+                == 0 and self.global_step >= 0):
             self.log_batch_results(guidance_input, extra)
-        if (
-            self.global_step % self.params.general.log_train_images_interval == 0
-            and self.global_step >= 0
-        ):
+        if (self.global_step % self.params.general.log_train_images_interval
+                == 0 and self.global_step >= 0):
             self.log_sampling_images(batch)
 
         return loss
 
     def on_validation_start(self) -> None:
-        self.metrics_sampling = CollectionMetric(
-            {
-                "mse_rggb": MSEMetric(),
-                "psnr_rggb": PSNRMetric(),
-                "ssim_rggb": SSIMMetric(),
-                "peason_rggb": PearsonMetric(),
-                "mse_rgb": MSEMetric(rggb_to_rgb=True),
-                "psnr_rgb": PSNRMetric(rggb_to_rgb=True),
-                "ssim_rgb": SSIMMetric(rggb_to_rgb=True),
-                "peason_rgb": PearsonMetric(rggb_to_rgb=True),
-            }
-        )
+        self.metrics_sampling = CollectionMetric({
+            "mse_rggb":
+            MSEMetric(),
+            "psnr_rggb":
+            PSNRMetric(),
+            "ssim_rggb":
+            SSIMMetric(),
+            "peason_rggb":
+            PearsonMetric(),
+            "mse_rgb":
+            MSEMetric(rggb_to_rgb=True),
+            "psnr_rgb":
+            PSNRMetric(rggb_to_rgb=True),
+            "ssim_rgb":
+            SSIMMetric(rggb_to_rgb=True),
+            "peason_rgb":
+            PearsonMetric(rggb_to_rgb=True),
+        })
 
         self.eval_diffusion_process = (
-            self.current_epoch + 1
-        ) % self.params.general.eval_diffusion_process_interval == 0
-        print("validation_start", self.current_epoch, self.eval_diffusion_process)
+            self.current_epoch +
+            1) % self.params.general.eval_diffusion_process_interval == 0
+        print("validation_start", self.current_epoch,
+              self.eval_diffusion_process)
 
     def validation_step(self, batch, batch_idx):
         input_data = batch["raw_data"]
@@ -147,18 +156,20 @@ class RAWDiffusionModule(LightningModule):
         guidance_input = self.preprocess_guidance(guidance_data)
 
         sampling_seed = 123 + batch_idx
-        loss, extra, metrics = self.forward_step(
-            input_data, guidance_input, sampling_seed=sampling_seed
-        )
+        loss, extra, metrics = self.forward_step(input_data,
+                                                 guidance_input,
+                                                 sampling_seed=sampling_seed)
 
-        self.log(
-            "val_loss", loss, on_step=True, on_epoch=True, prog_bar=True, logger=True
-        )
+        self.log("val_loss",
+                 loss,
+                 on_step=True,
+                 on_epoch=True,
+                 prog_bar=True,
+                 logger=True)
 
         val_steps_per_epoch = self.trainer.num_val_batches[0]
-        sampling_interval = (
-            val_steps_per_epoch // self.params.general.val_sampling_frequency
-        )
+        sampling_interval = (val_steps_per_epoch //
+                             self.params.general.val_sampling_frequency)
 
         sampling = batch_idx % sampling_interval == 0
         sampling_log_images = (
@@ -167,9 +178,10 @@ class RAWDiffusionModule(LightningModule):
 
         if sampling and sampling_log_images:
             filename = f"{batch_idx:04d}_{(self.global_step):06d}.png"
-            self.log_batch_results(
-                guidance_input, extra, mode="validation", filename=filename
-            )
+            self.log_batch_results(guidance_input,
+                                   extra,
+                                   mode="validation",
+                                   filename=filename)
 
         if self.eval_diffusion_process and sampling:
             filename = f"{batch_idx:04d}_{(self.global_step):06d}.png"
@@ -183,9 +195,8 @@ class RAWDiffusionModule(LightningModule):
             )
             input_data_device = input_data.to(raw_generated.device)
 
-            self.metrics_sampling.update(
-                self.normalize_inv(input_data_device), self.normalize_inv(raw_generated)
-            )
+            self.metrics_sampling.update(self.normalize_inv(input_data_device),
+                                         self.normalize_inv(raw_generated))
 
     def on_validation_epoch_end(self) -> None:
         if self.eval_diffusion_process:
@@ -198,18 +209,19 @@ class RAWDiffusionModule(LightningModule):
         drop_rate = self.params.general.drop_rate
         bs = guidance_data.shape[0]
         if self.training and drop_rate > 0.0:
-            mask = (
-                (torch.rand([bs, 1, 1, 1]) > drop_rate).float().to(guidance_data.device)
-            )
+            mask = ((torch.rand([bs, 1, 1, 1])
+                     > drop_rate).float().to(guidance_data.device))
             guidance_data = guidance_data * mask
 
         guidance_input["guidance_data"] = guidance_data
 
         return guidance_input
 
-    def log_batch_results(
-        self, model_kwargs, return_dict, mode="training", filename=None
-    ):
+    def log_batch_results(self,
+                          model_kwargs,
+                          return_dict,
+                          mode="training",
+                          filename=None):
         x_start = return_dict["x_start"]
         x_t = return_dict["x_t"]
         model_output = return_dict["model_output"]
@@ -271,16 +283,15 @@ class RAWDiffusionModule(LightningModule):
             shape = (bs, self.params.model.in_channels, h, w)
             noise = torch.randn(*shape, device=self.device, generator=g)
 
-            sample_fn = (
-                diffusion.p_sample_loop if not use_ddim else diffusion.ddim_sample_loop
-            )
+            sample_fn = (diffusion.p_sample_loop
+                         if not use_ddim else diffusion.ddim_sample_loop)
             sample = sample_fn(
                 self.model,
                 shape,
                 noise=noise,
                 clip_denoised=clip_denoised,
                 model_kwargs=guidance_input,
-                progress=True,
+                progress=False,
             )
 
         d = sample.device
@@ -292,7 +303,9 @@ class RAWDiffusionModule(LightningModule):
                 input_data = self.rggb_to_rgb_and_gc(input_data)
                 sample = self.rggb_to_rgb_and_gc(sample)
 
-            vis = torch.concat([input_data.to(d), guidance_data.to(d), sample], dim=3)
+            vis = torch.concat([input_data.to(d),
+                                guidance_data.to(d), sample],
+                               dim=3)
             vis = self.normalize_inv(vis)
 
             vis = make_grid(vis, nrow=1)
@@ -332,20 +345,23 @@ class RAWDiffusionModule(LightningModule):
             )
         elif self.params.general.lr_scheduler == "cosine":
             scheduler = lr_scheduler.CosineAnnealingLR(
-                optimizer, T_max=self.params.general.max_steps, eta_min=0.0
-            )
+                optimizer, T_max=self.params.general.max_steps, eta_min=0.0)
         else:
             raise ValueError(
-                f"Unknown lr_scheduler: {self.params.general.lr_scheduler}"
-            )
+                f"Unknown lr_scheduler: {self.params.general.lr_scheduler}")
 
         return {
             "optimizer": optimizer,
-            "lr_scheduler": {"scheduler": scheduler, "interval": "step"},
+            "lr_scheduler": {
+                "scheduler": scheduler,
+                "interval": "step"
+            },
         }
 
 
-@hydra.main(version_base="1.3", config_path="configs", config_name="rawdiffusion")
+@hydra.main(version_base="1.3",
+            config_path="configs",
+            config_name="rawdiffusion")
 def main(cfg: DictConfig) -> None:
     mod_config(cfg)
     OmegaConf.resolve(cfg)
@@ -353,20 +369,24 @@ def main(cfg: DictConfig) -> None:
 
     pl.seed_everything(cfg.general.seed)
 
-    aim_logger = AimLogger(
-        experiment="diffusion",
-        train_metric_prefix=None,
-        test_metric_prefix=None,
-        val_metric_prefix=None,
-    )
-
     experiment_folder = get_output_path(cfg)
     print(f"experiment_folder: {experiment_folder}")
 
-    print("creating data loader...")
-    data_train = create_dataset(
-        **cfg.dataset.train, seed=cfg.general.seed, patch_size=cfg.general.image_size
+    os.makedirs(experiment_folder, exist_ok=True)
+    hparams_json = OmegaConf.to_container(cfg, resolve=True)
+    with open(os.path.join(experiment_folder, "hparams.json"), "w") as f:
+        json.dump(hparams_json, f, indent=2)
+
+    csv_logger = CSVLogger(
+        save_dir=experiment_folder,
+        name="metrics",
+        flush_logs_every_n_steps=1,
     )
+
+    print("creating data loader...")
+    data_train = create_dataset(**cfg.dataset.train,
+                                seed=cfg.general.seed,
+                                patch_size=cfg.general.image_size)
     data_val = create_dataset(
         **cfg.dataset.val,
         seed=cfg.general.seed,
@@ -398,7 +418,7 @@ def main(cfg: DictConfig) -> None:
         accelerator="gpu",
         devices=1,
         max_steps=cfg.general.max_steps,
-        logger=aim_logger,
+        logger=csv_logger,
         callbacks=trainer_callbacks,
         enable_checkpointing=cfg.general.checkpoint,
         check_val_every_n_epoch=cfg.general.check_val_every_n_epoch,
