@@ -98,9 +98,12 @@ class ResBlock(TimestepBlock):
         self.in_layers = nn.Sequential(
             normalization_fn(channels),
             SiLU(),
-            conv_nd(
-                dims, channels, self.out_channels, 3, padding=1, padding_mode="reflect"
-            ),
+            conv_nd(dims,
+                    channels,
+                    self.out_channels,
+                    3,
+                    padding=1,
+                    padding_mode="reflect"),
         )
 
         self.updown = up or down
@@ -118,7 +121,8 @@ class ResBlock(TimestepBlock):
             SiLU(),
             linear(
                 emb_channels,
-                2 * self.out_channels if use_scale_shift_norm else self.out_channels,
+                2 * self.out_channels
+                if use_scale_shift_norm else self.out_channels,
             ),
         )
         self.out_layers = nn.Sequential(
@@ -133,19 +137,27 @@ class ResBlock(TimestepBlock):
                     3,
                     padding=1,
                     padding_mode="reflect",
-                )
-            ),
+                )),
         )
 
         if self.out_channels == channels:
             self.skip_connection = nn.Identity()
         elif use_conv:
             self.skip_connection = conv_nd(
-                dims, channels, self.out_channels, 3, padding=1, padding_mode="reflect"
+                dims,
+                channels,
+                self.out_channels,
+                3,
+                padding=1,
+                padding_mode="reflect",
             )
         else:
             self.skip_connection = conv_nd(
-                dims, channels, self.out_channels, 1, padding_mode="reflect"
+                dims,
+                channels,
+                self.out_channels,
+                1,
+                padding_mode="reflect",
             )
 
     def forward(self, x, emb):
@@ -156,9 +168,8 @@ class ResBlock(TimestepBlock):
         :param emb: an [N x emb_channels] Tensor of timestep embeddings.
         :return: an [N x C x ...] Tensor of outputs.
         """
-        return checkpoint(
-            self._forward, (x, emb), self.parameters(), self.use_checkpoint
-        )
+        return checkpoint(self._forward, (x, emb), self.parameters(),
+                          self.use_checkpoint)
 
     def _forward(self, x, emb):
         if self.updown:
@@ -169,9 +180,11 @@ class ResBlock(TimestepBlock):
             h = in_conv(h)
         else:
             h = self.in_layers(x)
+
         emb_out = self.emb_layers(emb).type(h.dtype)
         while len(emb_out.shape) < len(h.shape):
             emb_out = emb_out[..., None]
+
         if self.use_scale_shift_norm:
             out_norm, out_rest = self.out_layers[0], self.out_layers[1:]
             scale, shift = th.chunk(emb_out, 2, dim=1)
@@ -180,10 +193,172 @@ class ResBlock(TimestepBlock):
         else:
             h = h + emb_out
             h = self.out_layers(h)
+
+        return self.skip_connection(x) + h
+
+
+class FiLMResidualBlock(CondTimestepBlock):
+    """
+    A residual block that use FiLM conditioning.
+    
+    :param cond_channels: dimension of FiLM conditioning vector.
+    """
+
+    def __init__(
+        self,
+        channels,
+        emb_channels,
+        dropout,
+        normalization_fn,
+        cond_channels,
+        c_channels=None,
+        out_channels=None,
+        use_conv=False,
+        use_scale_shift_norm=True,
+        dims=2,
+        use_checkpoint=False,
+        up=False,
+        down=False,
+    ):
+        super().__init__()
+        assert c_channels is None
+
+        self.channels = channels
+        self.emb_channels = emb_channels
+        self.dropout = dropout
+        self.out_channels = out_channels or channels
+        self.use_conv = use_conv
+        self.use_checkpoint = use_checkpoint
+        self.use_scale_shift_norm = use_scale_shift_norm
+        self.cond_channels = cond_channels
+
+        # In layers
+        self.in_norm = normalization_fn(channels)
+        self.in_activation = SiLU()
+        self.in_conv = conv_nd(
+            dims,
+            channels,
+            self.out_channels,
+            3,
+            padding=1,
+            padding_mode="reflect",
+        )
+
+        self.updown = up or down
+
+        if up:
+            self.h_upd = Upsample(channels, False, dims)
+            self.x_upd = Upsample(channels, False, dims)
+        elif down:
+            self.h_upd = Downsample(channels, False, dims)
+            self.x_upd = Downsample(channels, False, dims)
+        else:
+            self.h_upd = self.x_upd = nn.Identity()
+
+        self.emb_layers = nn.Sequential(
+            SiLU(),
+            linear(
+                emb_channels,
+                2 * self.out_channels
+                if use_scale_shift_norm else self.out_channels,
+            ),
+        )
+
+        # Out layers
+        self.out_norm = normalization_fn(self.out_channels)
+        self.out_activation = SiLU()
+        self.out_dropout = nn.Dropout(p=dropout)
+        self.out_conv = zero_module(
+            conv_nd(
+                dims,
+                self.out_channels,
+                self.out_channels,
+                3,
+                padding=1,
+                padding_mode="reflect",
+            ))
+
+        assert cond_channels is not None and cond_channels > 0
+
+        self.film1 = linear(cond_channels, 2 * channels)
+        self.film2 = linear(cond_channels, 2 * self.out_channels)
+
+        if self.out_channels == channels:
+            self.skip_connection = nn.Identity()
+        elif use_conv:
+            self.skip_connection = conv_nd(
+                dims,
+                channels,
+                self.out_channels,
+                3,
+                padding=1,
+                padding_mode="reflect",
+            )
+        else:
+            self.skip_connection = conv_nd(
+                dims,
+                channels,
+                self.out_channels,
+                1,
+                padding_mode="reflect",
+            )
+
+    @staticmethod
+    def _apply_film(h, film_layer, cond):
+        """
+        Apply FiLM modulation: h * (1 + gamma) + beta
+        """
+        if film_layer is None or cond is None:
+            return h
+
+        gb = film_layer(cond)  # [N, 2C]
+        gamma, beta = th.chunk(gb, 2, dim=1)
+
+        # broadcast to spatial dims
+        while len(gamma.shape) < len(h.shape):
+            gamma = gamma[..., None]
+            beta = beta[..., None]
+
+        return h * (1 + gamma) + beta
+
+    def forward(self, x, cond, emb):
+        return checkpoint(self._forward, (x, cond, emb), self.parameters(),
+                          self.use_checkpoint)
+
+    def _forward(self, x, cond, emb):
+        h = self.in_norm(x)
+        h = self._apply_film(h, self.film1, cond)
+        h = self.in_activation(h)
+
+        if self.updown:
+            h = self.h_upd(h)
+            x = self.x_upd(x)
+
+        h = self.in_conv(h)
+
+        emb_out = self.emb_layers(emb).type(h.dtype)
+        while len(emb_out.shape) < len(h.shape):
+            emb_out = emb_out[..., None]
+
+        if self.use_scale_shift_norm:
+            scale, shift = th.chunk(emb_out, 2, dim=1)
+            h = self.out_norm(h)
+            h = self._apply_film(h, self.film2, cond)
+            h = h * (1 + scale) + shift
+        else:
+            h = h + emb_out
+            h = self.out_norm(h)
+            h = self._apply_film(h, self.film2, cond)
+
+        h = self.out_activation(h)
+        h = self.out_dropout(h)
+        h = self.out_conv(h)
+
         return self.skip_connection(x) + h
 
 
 class RGBGuidedResidualBlock(CondTimestepBlock):
+
     def __init__(
         self,
         channels,
@@ -208,14 +383,17 @@ class RGBGuidedResidualBlock(CondTimestepBlock):
         self.use_checkpoint = use_checkpoint
         self.use_scale_shift_norm = use_scale_shift_norm
 
-        self.in_norm = SPADEGroupNorm(
-            channels, c_channels, normalization_fn=normalization_fn
-        )
+        self.in_norm = SPADEGroupNorm(channels,
+                                      c_channels,
+                                      normalization_fn=normalization_fn)
         self.in_layers = nn.Sequential(
             SiLU(),
-            conv_nd(
-                dims, channels, self.out_channels, 3, padding=1, padding_mode="reflect"
-            ),
+            conv_nd(dims,
+                    channels,
+                    self.out_channels,
+                    3,
+                    padding=1,
+                    padding_mode="reflect"),
         )
 
         self.updown = up or down
@@ -233,12 +411,13 @@ class RGBGuidedResidualBlock(CondTimestepBlock):
             SiLU(),
             linear(
                 emb_channels,
-                2 * self.out_channels if use_scale_shift_norm else self.out_channels,
+                2 * self.out_channels
+                if use_scale_shift_norm else self.out_channels,
             ),
         )
-        self.out_norm = SPADEGroupNorm(
-            self.out_channels, c_channels, normalization_fn=normalization_fn
-        )
+        self.out_norm = SPADEGroupNorm(self.out_channels,
+                                       c_channels,
+                                       normalization_fn=normalization_fn)
         self.out_layers = nn.Sequential(
             SiLU(),
             nn.Dropout(p=dropout),
@@ -250,25 +429,28 @@ class RGBGuidedResidualBlock(CondTimestepBlock):
                     3,
                     padding=1,
                     padding_mode="reflect",
-                )
-            ),
+                )),
         )
 
         if self.out_channels == channels:
             self.skip_connection = nn.Identity()
         elif use_conv:
-            self.skip_connection = conv_nd(
-                dims, channels, self.out_channels, 3, padding=1, padding_mode="reflect"
-            )
+            self.skip_connection = conv_nd(dims,
+                                           channels,
+                                           self.out_channels,
+                                           3,
+                                           padding=1,
+                                           padding_mode="reflect")
         else:
-            self.skip_connection = conv_nd(
-                dims, channels, self.out_channels, 1, padding_mode="reflect"
-            )
+            self.skip_connection = conv_nd(dims,
+                                           channels,
+                                           self.out_channels,
+                                           1,
+                                           padding_mode="reflect")
 
     def forward(self, x, cond, emb):
-        return checkpoint(
-            self._forward, (x, cond, emb), self.parameters(), self.use_checkpoint
-        )
+        return checkpoint(self._forward, (x, cond, emb), self.parameters(),
+                          self.use_checkpoint)
 
     def _forward(self, x, cond, emb):
         if isinstance(cond, (tuple, list)):
