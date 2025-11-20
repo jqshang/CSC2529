@@ -316,7 +316,6 @@ class RAWDiffusionModel(nn.Module):
 
         # Decoder
         if control_input_res is not None:
-            # sanity: same number of encoder activations and control features
             assert len(control_input_res) == len(hs)
             control_idx = len(control_input_res) - 1
         else:
