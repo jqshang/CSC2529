@@ -13,4 +13,3 @@ rich==13.8.1
 imageio==2.35.1
 hydra-slurm-rich-launcher==1.1.0
 h5py==3.12.1
-aim
