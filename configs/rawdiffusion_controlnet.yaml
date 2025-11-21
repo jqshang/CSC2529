@@ -53,7 +53,8 @@ model:
   latent_drop_rate: 0.0
   conditional_block_name: RGBGuidedResidualBlock
   norm_num_groups: 8
-  use_film: False
+  use_film: True
+  cond_channels: 5 # number of cameras models
 
 diffusion:
   learn_sigma: False

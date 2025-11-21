@@ -1,0 +1,4 @@
+defaults:
+- train: all
+- val: all
+- _self_

@@ -8,6 +8,7 @@ from .residual_blocks import (
     Downsample,
     TimestepEmbedSequential,
 )
+from .rawdiffusion import RAWDiffusionModel
 from .attention_blocks import AttentionBlock
 from functools import partial
 
@@ -227,3 +228,27 @@ class RAWControlNet(nn.Module):
             "input_block_res": hs,
             "middle_block_res": middle_block_res,
         }
+
+
+class RAWDiffusionWithControlNet(nn.Module):
+
+    def __init__(
+        self,
+        backbone: RAWDiffusionModel,
+        controlnet: RAWControlNet,
+        controlnet_scale: float = 1.0,
+    ):
+        super().__init__()
+        self.backbone = backbone
+        self.controlnet = controlnet
+        self.controlnet_scale = controlnet_scale
+
+    def forward(self, x, timesteps, guidance_data, cond=None, **kwargs):
+        return self.backbone(
+            x,
+            timesteps,
+            guidance_data=guidance_data,
+            cond=cond,
+            controlnet=self.controlnet,
+            controlnet_scale=self.controlnet_scale,
+        )
