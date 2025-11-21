@@ -171,6 +171,7 @@ class RAWDiffusionModule(LightningModule):
         sampling_interval = (val_steps_per_epoch //
                              self.params.general.val_sampling_frequency)
 
+        sampling_interval = max(1, sampling_interval)
         sampling = batch_idx % sampling_interval == 0
         sampling_log_images = (
             batch_idx // sampling_interval

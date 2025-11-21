@@ -1,9 +1,12 @@
 import os
+import torch
+import omegaconf
+
+from omegaconf.dictconfig import DictConfig
 
 import h5py
 import hydra
 import numpy as np
-import torch
 import torchvision as tv
 import yaml
 from omegaconf import DictConfig, OmegaConf
@@ -63,9 +66,23 @@ def main(cfg: DictConfig) -> None:
     output_name = get_val_output_name(cfg)
     print(f"inference output name: {output_name}")
 
-    raw_module = RAWDiffusionModule.load_from_checkpoint(
-        checkpoint_path, experiment_folder=experiment_folder, **cfg
+    # raw_module = RAWDiffusionModule.load_from_checkpoint(
+    #     checkpoint_path, experiment_folder=experiment_folder, **cfg,
+    #     weights_only=True
+    # )
+
+    raw_module = RAWDiffusionModule(
+        experiment_folder=experiment_folder,
+        **cfg,
     )
+    
+    with torch.serialization.safe_globals([DictConfig]):
+        checkpoint = torch.load(checkpoint_path, map_location="cuda", weights_only=False)
+
+    state = state = checkpoint["state_dict"]
+    raw_module.load_state_dict(state)
+    raw_module.cuda()
+
 
     data_val = create_dataset(
         **cfg.dataset.val,
