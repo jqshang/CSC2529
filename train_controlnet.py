@@ -49,6 +49,24 @@ class RAWDiffusionModule(LightningModule):
 
         backbone: RAWDiffusionModel = instantiate(self.params.model,
                                                   image_size=image_size)
+
+        ckpt_path = getattr(self.params.general, "backbone_ckpt", None)
+        if ckpt_path is not None:
+            print(f"Loading backbone weights from {ckpt_path}")
+            ckpt = torch.load(ckpt_path, map_location=self.device)
+
+            state_dict = ckpt["state_dict"] if "state_dict" in ckpt else ckpt
+
+            new_state_dict = {}
+            for k, v in state_dict.items():
+                if k.startswith("model."):
+                    new_state_dict[k[len("model."):]] = v
+
+            missing, unexpected = backbone.load_state_dict(new_state_dict,
+                                                           strict=False)
+            print("Backbone loaded. Missing keys:", missing)
+            print("Backbone loaded. Unexpected keys:", unexpected)
+
         controlnet = RAWControlNet(
             image_size=image_size,
             in_channels=in_channels,
@@ -248,6 +266,11 @@ class RAWDiffusionModule(LightningModule):
 
         if camera_id is not None:
             num_cameras = self.params.general.num_cameras
+            camera_id = torch.tensor(
+                [camera_id] * bs,
+                dtype=torch.int64,
+                device=guidance_data.device,
+            )
             cond = F.one_hot(camera_id.long(), num_classes=num_cameras).float()
             guidance_input["cond"] = cond
 
@@ -401,7 +424,7 @@ class RAWDiffusionModule(LightningModule):
 
 @hydra.main(version_base="1.3",
             config_path="configs",
-            config_name="rawdiffusion")
+            config_name="rawdiffusion_controlnet")
 def main(cfg: DictConfig) -> None:
     mod_config(cfg)
     OmegaConf.resolve(cfg)

@@ -1,5 +1,5 @@
 defaults:
-  - dataset: nod_nikon
+  - dataset: all
   - model/rgb_guidance_module: edsr # edsr
   - override hydra/launcher: slurm_rich
   - _self_
@@ -9,7 +9,7 @@ general:
   lr: 1e-4
   weight_decay: 0.0
   schedule_sampler: "uniform"
-  max_steps: 70000
+  max_steps: 10000
   drop_rate: 0.0
   save_interval: 1000
   checkpoint: true
@@ -54,7 +54,8 @@ model:
   conditional_block_name: RGBGuidedResidualBlock
   norm_num_groups: 8
   use_film: True
-  cond_channels: 5 # number of cameras models
+  cond_channels: 2 # number of cameras models
+  backbone_ckpt: ./checkpoint/last.ckpt
 
 diffusion:
   learn_sigma: False

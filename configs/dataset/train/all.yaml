@@ -3,6 +3,6 @@ defaults:
 - _self_
 
 data_dir: ./data/fivek_dataset_processed/fivek_patches_3/
-camera_name: Canon_EOS_5D, NIKON_D700
-file_list: Canon_EOS_5D_train.txt, NIKON_D700_train.txt
+camera_name: Canon_EOS_5D,NIKON_D700
+file_list: Canon_EOS_5D_train.txt,NIKON_D700_train.txt
 batch_size: 4

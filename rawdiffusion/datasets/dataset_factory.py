@@ -24,9 +24,13 @@ def create_dataset(
 ):
     if not data_dir:
         raise ValueError("unspecified data directory")
+    camera_names = camera_name.split(",")
+    file_lists = file_list.split(",")
 
+    # currently only support single dataset with multiple models
     dataset_folder_name = os.path.basename(os.path.normpath(data_dir)).lower()
     dataset_name = dataset_folder_name.split("_")[0]
+
     if transform:
         transforms = ImageTransforms(
             patch_size=patch_size,
@@ -37,67 +41,44 @@ def create_dataset(
 
     assert min_mode in ["min_value", "black_level"]
 
-    if dataset_name in ["fivek", "nod"]:
-        camera = get_camera(dataset_name, camera_name)
-        if camera is None:
-            raise ValueError(f"unknown camera_name: {camera_name}")
-        if min_mode == "min_value":
-            raw_min_value = camera.min_value
-        elif min_mode == "black_level":
-            raw_min_value = camera.black_level
-        else:
-            raise ValueError(f"unknown min_mode: {min_mode}")
+    raw_min_values = []
+    raw_max_values = []
 
-        raw_max_value = camera.white_level
-    elif dataset_name in ["cityscapes", "bdd100k", "pascalraw"]:
-        raw_min_value = None
-        raw_max_value = None
-    else:
-        raise ValueError(f"unknown dataset_name: {dataset_name}")
+    for camera_name in camera_names:
+        if dataset_name in ["fivek", "nod"]:
+            camera = get_camera(dataset_name, camera_name)
+            if camera is None:
+                raise ValueError(f"unknown camera_name: {camera_name}")
+            if min_mode == "min_value":
+                raw_min_values.append(camera.min_value)
+            elif min_mode == "black_level":
+                raw_min_values.append(camera.black_level)
+            else:
+                raise ValueError(f"unknown min_mode: {min_mode}")
+
+            raw_max_values.append(camera.white_level)
+        elif dataset_name in ["cityscapes", "bdd100k", "pascalraw"]:
+            raw_min_values.append(None)
+            raw_max_values.append(None)
+        else:
+            raise ValueError(f"unknown dataset_name: {dataset_name}")
 
     if max_items is not None:
-        name, ext = os.path.splitext(file_list)
-        
-        # file_list = f"{name}_{max_items}_{seed}{ext}"
-        file_list = f"{name}{ext}"
+        new_file_lists = []
+        for file_list in file_lists:
+            name, ext = os.path.splitext(file_list)
+            # file_list = f"{name}_{max_items}_{seed}{ext}"
+            file_list = f"{name}{ext}"
+            new_file_lists.append(file_list)
+        file_lists = new_file_lists
 
-    if "fivek" in dataset_folder_name:
-        dataset = RAWImageDataset(
-            file_list=file_list,
-            dataset_path=data_dir,
-            raw_min_value=raw_min_value,
-            raw_max_value=raw_max_value,
-            transforms=transforms,
-        )
-    elif "nod" in dataset_folder_name:
-        dataset = RAWImageDataset(
-            file_list=file_list,
-            dataset_path=data_dir,
-            raw_min_value=raw_min_value,
-            raw_max_value=raw_max_value,
-            transforms=transforms,
-        )
-    elif "cityscapes" in dataset_folder_name:
-        dataset = RAWImageDataset(
-            file_list=file_list,
-            dataset_path=data_dir,
-            raw_min_value=None,
-            raw_max_value=None,
-            transforms=transforms,
-            rgb_only=True,
-        )
-
-    elif "bdd" in dataset_folder_name:
-        dataset = RAWImageDataset(
-            file_list=file_list,
-            dataset_path=data_dir,
-            raw_min_value=None,
-            raw_max_value=None,
-            transforms=transforms,
-            rgb_only=True,
-        )
-    else:
-        raise ValueError(f"unknown dataset_folder_name: {dataset_folder_name}")
+    dataset = RAWImageDataset(
+        file_lists=file_lists,
+        dataset_path=data_dir,
+        raw_min_values=raw_min_values,
+        raw_max_values=raw_max_values,
+        transforms=transforms,
+    )
 
     if permutate_once:
         from .dataset_wrapper import PermutedDataset

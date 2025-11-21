@@ -11,7 +11,6 @@ from .residual_blocks import (
 )
 from .attention_blocks import AttentionBlock
 from functools import partial
-from rawdiffusion.models.controlnet import RAWControlNet
 
 
 class RAWDiffusionModel(nn.Module):
