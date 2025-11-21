@@ -14,3 +14,5 @@ rgb_only: false
 save_visualization_interval: 500
 save_timesteps: false
 save_as_hdf5: true
+input_rgb_path: /content/a1882-07-11-23-at-17h04m28s-_MG_6574_0_rgb.png
+output_raw_path: /content/output.png
