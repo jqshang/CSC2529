@@ -495,6 +495,15 @@ def main(cfg: DictConfig) -> None:
 
     trainer.fit(raw_module, data_train, data_val)
 
+    checkpoint_path = os.path.join(
+        experiment_folder,
+        "checkpoints",
+    )
+
+    full_ckpt_path = os.path.join(checkpoint_path, "last.ckpt")
+    raw_module.trainer.save_checkpoint(full_ckpt_path)
+    print("Saved full Lightning checkpoint to:", full_ckpt_path)
+
 
 if __name__ == "__main__":
     main()
