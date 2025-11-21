@@ -12,7 +12,7 @@ general:
   max_steps: 10000
   drop_rate: 0.0
   save_interval: 1000
-  checkpoint: true
+  checkpoint: False
   suffix: null
 
   weight_l2: 1.0
@@ -29,6 +29,8 @@ general:
   
   seed: 0
   image_size: 256
+  num_cameras: 2 # number of cameras models
+  backbone_ckpt: ./checkpoint/last.ckpt
 
 model:
   _target_: rawdiffusion.models.rawdiffusion.RAWDiffusionModel
@@ -41,7 +43,7 @@ model:
   attention_resolutions: "16,8"
   channel_mult: ""
   dropout: 0.0
-  use_checkpoint: True
+  use_checkpoint: False
   use_scale_shift_norm: True
   resblock_updown: True
   use_new_attention_order: False
@@ -53,9 +55,8 @@ model:
   latent_drop_rate: 0.0
   conditional_block_name: RGBGuidedResidualBlock
   norm_num_groups: 8
-  use_film: True
+  use_film: False
   cond_channels: 2 # number of cameras models
-  backbone_ckpt: ./checkpoint/last.ckpt
 
 diffusion:
   learn_sigma: False

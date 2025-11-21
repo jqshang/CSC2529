@@ -10,11 +10,13 @@ import torch.nn as nn
 
 # PyTorch 1.7 has SiLU, but we support PyTorch 1.5.
 class SiLU(nn.Module):
+
     def forward(self, x):
         return x * th.sigmoid(x)
 
 
 class GroupNormFloat(nn.GroupNorm):
+
     def forward(self, x):
         return super().forward(x.float()).type(x.dtype)
 
@@ -92,13 +94,14 @@ def timestep_embedding(timesteps, dim, max_period=10000):
     :return: an [N x dim] Tensor of positional embeddings.
     """
     half = dim // 2
-    freqs = th.exp(
-        -math.log(max_period) * th.arange(start=0, end=half, dtype=th.float32) / half
-    ).to(device=timesteps.device)
+    freqs = th.exp(-math.log(max_period) *
+                   th.arange(start=0, end=half, dtype=th.float32) /
+                   half).to(device=timesteps.device)
     args = timesteps[:, None].float() * freqs[None]
     embedding = th.cat([th.cos(args), th.sin(args)], dim=-1)
     if dim % 2:
-        embedding = th.cat([embedding, th.zeros_like(embedding[:, :1])], dim=-1)
+        embedding = th.cat(
+            [embedding, th.zeros_like(embedding[:, :1])], dim=-1)
     return embedding
 
 
@@ -114,13 +117,16 @@ def checkpoint(func, inputs, params, flag):
     :param flag: if False, disable gradient checkpointing.
     """
     if flag:
-        args = tuple(inputs) + tuple(params)
+        trainable_params = tuple(p for p in params if p.requires_grad)
+        if not trainable_params:
+            return func(*inputs)
+        args = tuple(inputs) + trainable_params
         return CheckpointFunction.apply(func, len(inputs), *args)
-    else:
-        return func(*inputs)
+    return func(*inputs)
 
 
 class CheckpointFunction(th.autograd.Function):
+
     @staticmethod
     def forward(ctx, run_function, length, *args):
         ctx.run_function = run_function
@@ -132,7 +138,9 @@ class CheckpointFunction(th.autograd.Function):
 
     @staticmethod
     def backward(ctx, *output_grads):
-        ctx.input_tensors = [x.detach().requires_grad_(True) for x in ctx.input_tensors]
+        ctx.input_tensors = [
+            x.detach().requires_grad_(True) for x in ctx.input_tensors
+        ]
         with th.enable_grad():
             # Fixes a bug where the first op in run_function modifies the
             # Tensor storage in place, which is not allowed for detach()'d

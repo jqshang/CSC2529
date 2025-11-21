@@ -53,7 +53,9 @@ class RAWDiffusionModule(LightningModule):
         ckpt_path = getattr(self.params.general, "backbone_ckpt", None)
         if ckpt_path is not None:
             print(f"Loading backbone weights from {ckpt_path}")
-            ckpt = torch.load(ckpt_path, map_location=self.device)
+            ckpt = torch.load(ckpt_path,
+                              map_location=self.device,
+                              weights_only=False)
 
             state_dict = ckpt["state_dict"] if "state_dict" in ckpt else ckpt
 
@@ -74,9 +76,17 @@ class RAWDiffusionModule(LightningModule):
             num_res_blocks=self.params.model.num_res_blocks,
             attention_resolutions=self.params.model.attention_resolutions,
             channel_mult=self.params.model.channel_mult,
+            dropout=self.params.model.dropout,
+            use_checkpoint=self.params.model.use_checkpoint,
+            use_scale_shift_norm=self.params.model.use_scale_shift_norm,
+            resblock_updown=self.params.model.resblock_updown,
+            use_new_attention_order=self.params.model.use_new_attention_order,
+            mid_attention=self.params.model.mid_attention,
             c_channels=self.params.model.c_channels,
             use_film=self.params.model.use_film,
             cond_channels=self.params.model.cond_channels,
+            conditional_block_name=self.params.model.conditional_block_name,
+            norm_num_groups=self.params.model.norm_num_groups,
         )
 
         controlnet.load_state_dict(backbone.state_dict(), strict=False)
@@ -266,11 +276,6 @@ class RAWDiffusionModule(LightningModule):
 
         if camera_id is not None:
             num_cameras = self.params.general.num_cameras
-            camera_id = torch.tensor(
-                [camera_id] * bs,
-                dtype=torch.int64,
-                device=guidance_data.device,
-            )
             cond = F.one_hot(camera_id.long(), num_classes=num_cameras).float()
             guidance_input["cond"] = cond
 
