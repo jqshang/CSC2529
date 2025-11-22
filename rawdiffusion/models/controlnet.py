@@ -99,7 +99,7 @@ class RAWControlNet(nn.Module):
         self.input_zero_convs = nn.ModuleList([self.make_zero_conv(ch)])
 
         self.input_hint_block = TimestepEmbedSequential(
-            conv_nd(dims, hint_channels, ch, 1, padding=0),
+            conv_nd(dims, hint_channels, ch, 3, padding=1),
             nn.SiLU(),
             zero_module(conv_nd(dims, ch, ch, 1, padding=0)),
         )

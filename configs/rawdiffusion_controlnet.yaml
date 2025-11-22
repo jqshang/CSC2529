@@ -57,6 +57,7 @@ model:
   norm_num_groups: 8
   use_film: False
   film_cond_channels: 2 # number of cameras models
+  hint_channels: 2 # number of hint channels
 
 diffusion:
   learn_sigma: False
