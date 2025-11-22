@@ -43,7 +43,7 @@ class RAWDiffusionModel(nn.Module):
         norm_num_groups=8,
         latent_drop_rate=0,
         use_film=False,
-        cond_channels=None,
+        film_cond_channels=None,
     ):
         super().__init__()
 
@@ -74,10 +74,11 @@ class RAWDiffusionModel(nn.Module):
                                         num_groups=norm_num_groups)
 
         self.use_film = use_film
-        self.cond_channels = cond_channels
-        if self.use_film and self.cond_channels is None:
+        self.film_cond_channels = film_cond_channels
+        if self.use_film and self.film_cond_channels is None:
             raise ValueError(
-                "RAWDiffusionModel: use_film=True but cond_channels is None. ")
+                "RAWDiffusionModel: use_film=True but film_cond_channels is None. "
+            )
 
         if rgb_guidance_module:
             self.rgb_guidance_module = rgb_guidance_module(
@@ -125,7 +126,7 @@ class RAWDiffusionModel(nn.Module):
         )
 
         if self.use_film:
-            base_resblock_kwargs["cond_channels"] = cond_channels
+            base_resblock_kwargs["film_cond_channels"] = film_cond_channels
 
         resblock_standard = partial(BaseResBlock, **base_resblock_kwargs)
 
@@ -137,7 +138,8 @@ class RAWDiffusionModel(nn.Module):
             resblock_guidance_cls = ResBlock
             guidance_extra_kwargs = {}
             if self.use_film:
-                guidance_extra_kwargs["cond_channels"] = cond_channels
+                guidance_extra_kwargs[
+                    "film_cond_channels"] = film_cond_channels
         else:
             raise ValueError(
                 f"Unknown conditional block name: {conditional_block_name}")
@@ -259,12 +261,12 @@ class RAWDiffusionModel(nn.Module):
         x,
         timesteps,
         guidance_data,
-        cond=None,
+        film_cond=None,
         controlnet=None,
         controlnet_scale: float = 1.0,
     ):
 
-        if self.use_film and cond is None:
+        if self.use_film and film_cond is None:
             raise ValueError(
                 "RAWDiffusionModel is configured with use_film=True, but no cond was passed to forward()."
             )
@@ -290,7 +292,7 @@ class RAWDiffusionModel(nn.Module):
                 x=x,
                 timesteps=timesteps,
                 guidance_features=guidance_features,
-                cond=cond,
+                film_cond=film_cond,
             )
             control_input_res = control_out["input_block_res"]
             control_middle_res = control_out["middle_block_res"]
@@ -303,14 +305,14 @@ class RAWDiffusionModel(nn.Module):
         h = x.type(self.dtype)
         for block in self.input_blocks:
             if self.use_film:
-                h = block(h, guidance_features, emb, cond)
+                h = block(h, guidance_features, emb, film_cond)
             else:
                 h = block(h, guidance_features, emb)
             hs.append(h)
 
         # Bottleneck
         if self.use_film:
-            h = self.middle_block(h, guidance_features, emb, cond)
+            h = self.middle_block(h, guidance_features, emb, film_cond)
         else:
             h = self.middle_block(h, guidance_features, emb)
 
@@ -334,7 +336,7 @@ class RAWDiffusionModel(nn.Module):
             h = th.cat([h, skip], dim=1)
 
             if self.use_film:
-                h = block(h, guidance_features, emb, cond)
+                h = block(h, guidance_features, emb, film_cond)
             else:
                 h = block(h, guidance_features, emb)
 

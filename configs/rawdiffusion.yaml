@@ -54,6 +54,7 @@ model:
   conditional_block_name: RGBGuidedResidualBlock
   norm_num_groups: 8
   use_film: False
+  film_cond_channels: 2
 
 diffusion:
   learn_sigma: False

@@ -39,7 +39,7 @@ class RAWControlNet(nn.Module):
         conditional_block_name="RGBGuidedResidualBlock",
         norm_num_groups=8,
         use_film=False,
-        cond_channels=None,
+        film_cond_channels=None,
     ):
         super().__init__()
 
@@ -70,10 +70,11 @@ class RAWControlNet(nn.Module):
         )
 
         self.use_film = use_film
-        self.cond_channels = cond_channels
-        if self.use_film and self.cond_channels is None:
+        self.film_cond_channels = film_cond_channels
+        if self.use_film and self.film_cond_channels is None:
             raise ValueError(
-                "RAWControlNet: use_film=True but cond_channels is None. ")
+                "RAWControlNet: use_film=True but film_cond_channels is None. "
+            )
 
         time_embed_dim = model_channels * 4
         self.time_embed = nn.Sequential(
@@ -111,7 +112,7 @@ class RAWControlNet(nn.Module):
         )
 
         if self.use_film:
-            base_resblock_kwargs["cond_channels"] = cond_channels
+            base_resblock_kwargs["film_cond_channels"] = film_cond_channels
 
         resblock_standard = partial(BaseResBlock, **base_resblock_kwargs)
 
@@ -123,7 +124,8 @@ class RAWControlNet(nn.Module):
             resblock_guidance_cls = ResBlock
             guidance_extra_kwargs = {}
             if self.use_film:
-                guidance_extra_kwargs["cond_channels"] = cond_channels
+                guidance_extra_kwargs[
+                    "film_cond_channels"] = film_cond_channels
         else:
             raise ValueError(
                 f"Unknown conditional block name: {conditional_block_name}")
@@ -197,7 +199,7 @@ class RAWControlNet(nn.Module):
             timesteps:        [B] diffusion timesteps.
             guidance_features:[B, c_channels, H, W] output of frozen rgb_guidance_module.
                                (Already computed once and shared with RAWDiffusionModel.)
-            cond:             [B, cond_channels] FiLM condition vector if use_film=True.
+            cond:             [B, film_cond_channels] FiLM condition vector if use_film=True.
         """
 
         if self.use_film and cond is None:

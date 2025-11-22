@@ -11,6 +11,24 @@ from rawdiffusion.models.nn import (
 from .layer import SPADEGroupNorm, Upsample, Downsample
 
 
+def _apply_film(h, film_layer, film_cond):
+    """
+    Apply FiLM modulation: h * (1 + gamma) + beta
+    """
+    if film_layer is None or film_cond is None:
+        return h
+
+    gb = film_layer(film_cond)  # [N, 2C]
+    gamma, beta = th.chunk(gb, 2, dim=1)
+
+    # broadcast to spatial dims
+    while len(gamma.shape) < len(h.shape):
+        gamma = gamma[..., None]
+        beta = beta[..., None]
+
+    return h * (1 + gamma) + beta
+
+
 class TimestepBlock(nn.Module):
     """
     Any module where forward() takes timestep embeddings as a second argument.
@@ -35,15 +53,30 @@ class CondTimestepBlock(nn.Module):
         """
 
 
-class TimestepEmbedSequential(nn.Sequential, TimestepBlock, CondTimestepBlock):
+class FiLMTimestepBlock(nn.Module):
+    """
+    Any module where forward() takes timestep embeddings as a second argument.
+    """
+
+    @abstractmethod
+    def forward(self, x, emb, film_cond):
+        """
+        Apply the module to `x` given `emb` timestep embeddings.
+        """
+
+
+class TimestepEmbedSequential(nn.Sequential, TimestepBlock, CondTimestepBlock,
+                              FiLMTimestepBlock):
     """
     A sequential module that passes timestep embeddings to the children that
     support it as an extra input.
     """
 
-    def forward(self, x, cond, emb):
+    def forward(self, x, cond, emb, film_cond):
         for layer in self:
-            if isinstance(layer, CondTimestepBlock):
+            if isinstance(layer, FiLMTimestepBlock):
+                x = layer(x, emb, film_cond)
+            elif isinstance(layer, CondTimestepBlock):
                 x = layer(x, cond, emb)
             elif isinstance(layer, TimestepBlock):
                 x = layer(x, emb)
@@ -197,11 +230,11 @@ class ResBlock(TimestepBlock):
         return self.skip_connection(x) + h
 
 
-class FiLMResidualBlock(CondTimestepBlock):
+class FiLMResidualBlock(FiLMTimestepBlock):
     """
     A residual block that use FiLM conditioning.
     
-    :param cond_channels: dimension of FiLM conditioning vector.
+    :param film_cond_channels: dimension of FiLM conditioning vector.
     """
 
     def __init__(
@@ -210,7 +243,7 @@ class FiLMResidualBlock(CondTimestepBlock):
         emb_channels,
         dropout,
         normalization_fn,
-        cond_channels,
+        film_cond_channels,
         c_channels=None,
         out_channels=None,
         use_conv=False,
@@ -230,7 +263,7 @@ class FiLMResidualBlock(CondTimestepBlock):
         self.use_conv = use_conv
         self.use_checkpoint = use_checkpoint
         self.use_scale_shift_norm = use_scale_shift_norm
-        self.cond_channels = cond_channels
+        self.film_cond_channels = film_cond_channels
 
         # In layers
         self.in_norm = normalization_fn(channels)
@@ -278,10 +311,10 @@ class FiLMResidualBlock(CondTimestepBlock):
                 padding_mode="reflect",
             ))
 
-        assert cond_channels is not None and cond_channels > 0
+        assert film_cond_channels is not None and film_cond_channels > 0
 
-        self.film1 = linear(cond_channels, 2 * channels)
-        self.film2 = linear(cond_channels, 2 * self.out_channels)
+        self.film1 = linear(film_cond_channels, 2 * channels)
+        self.film2 = linear(film_cond_channels, 2 * self.out_channels)
 
         if self.out_channels == channels:
             self.skip_connection = nn.Identity()
@@ -303,31 +336,13 @@ class FiLMResidualBlock(CondTimestepBlock):
                 padding_mode="reflect",
             )
 
-    @staticmethod
-    def _apply_film(h, film_layer, cond):
-        """
-        Apply FiLM modulation: h * (1 + gamma) + beta
-        """
-        if film_layer is None or cond is None:
-            return h
+    def forward(self, x, emb, film_cond):
+        return checkpoint(self._forward, (x, emb, film_cond),
+                          self.parameters(), self.use_checkpoint)
 
-        gb = film_layer(cond)  # [N, 2C]
-        gamma, beta = th.chunk(gb, 2, dim=1)
-
-        # broadcast to spatial dims
-        while len(gamma.shape) < len(h.shape):
-            gamma = gamma[..., None]
-            beta = beta[..., None]
-
-        return h * (1 + gamma) + beta
-
-    def forward(self, x, cond, emb):
-        return checkpoint(self._forward, (x, cond, emb), self.parameters(),
-                          self.use_checkpoint)
-
-    def _forward(self, x, cond, emb):
+    def _forward(self, x, emb, film_cond):
         h = self.in_norm(x)
-        h = self._apply_film(h, self.film1, cond)
+        h = _apply_film(h, self.film1, film_cond)
         h = self.in_activation(h)
 
         if self.updown:
@@ -343,12 +358,12 @@ class FiLMResidualBlock(CondTimestepBlock):
         if self.use_scale_shift_norm:
             scale, shift = th.chunk(emb_out, 2, dim=1)
             h = self.out_norm(h)
-            h = self._apply_film(h, self.film2, cond)
+            h = _apply_film(h, self.film2, film_cond)
             h = h * (1 + scale) + shift
         else:
             h = h + emb_out
             h = self.out_norm(h)
-            h = self._apply_film(h, self.film2, cond)
+            h = _apply_film(h, self.film2, film_cond)
 
         h = self.out_activation(h)
         h = self.out_dropout(h)

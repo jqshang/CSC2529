@@ -84,7 +84,7 @@ class RAWDiffusionModule(LightningModule):
             mid_attention=self.params.model.mid_attention,
             c_channels=self.params.model.c_channels,
             use_film=self.params.model.use_film,
-            cond_channels=self.params.model.cond_channels,
+            film_cond_channels=self.params.model.film_cond_channels,
             conditional_block_name=self.params.model.conditional_block_name,
             norm_num_groups=self.params.model.norm_num_groups,
         )

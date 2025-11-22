@@ -5,6 +5,7 @@ import hydra
 import lightning.pytorch as pl
 import lightning.pytorch.callbacks as callbacks
 import torch
+import torch.nn.functional as F
 import torch.optim.lr_scheduler as lr_scheduler
 from lightning.pytorch.loggers import CSVLogger
 from hydra.utils import instantiate
@@ -44,6 +45,15 @@ class RAWDiffusionModule(LightningModule):
         in_channels = self.params.model.in_channels
         image_size = self.params.general.image_size
 
+        self.use_film = False
+        if "use_film" in self.params.model:
+            self.use_film = bool(self.params.model.use_film)
+            self.film_cond_channels = self.params.model.film_cond_channels
+            if self.film_cond_channels is None:
+                raise ValueError(
+                    "use_film=True but `model.film_cond_channels` is not set in the config."
+                )
+
         self.model = instantiate(self.params.model, image_size=image_size)
         self.diffusion = create_gaussian_diffusion(**self.params.diffusion)
         self.diffusion_val = create_gaussian_diffusion(
@@ -51,15 +61,27 @@ class RAWDiffusionModule(LightningModule):
         self.schedule_sampler = create_named_schedule_sampler(
             self.params.general.schedule_sampler, self.diffusion)
 
-        summary(
-            self.model,
-            input_size=[
-                (1, in_channels, image_size, image_size),
-                (1, ),
-                (1, 3, image_size, image_size),
-            ],
-            depth=2,
-        )
+        if "use_film" in self.params.model:
+            summary(
+                self.model,
+                input_size=[
+                    (1, in_channels, image_size, image_size),
+                    (1, ),
+                    (1, 3, image_size, image_size),
+                    (1, self.film_cond_channels),
+                ],
+                depth=2,
+            )
+        else:
+            summary(
+                self.model,
+                input_size=[
+                    (1, in_channels, image_size, image_size),
+                    (1, ),
+                    (1, 3, image_size, image_size),
+                ],
+                depth=2,
+            )
 
     def normalize_inv(self, x):
         return (x + 1) / 2.0
@@ -69,16 +91,28 @@ class RAWDiffusionModule(LightningModule):
             hp = OmegaConf.to_container(self.params, resolve=True)
             self.logger.log_hyperparams(hp)
 
-    def forward_step(self, input_data, guidance_input, sampling_seed=None):
+    def forward_step(self,
+                     input_data,
+                     guidance_input,
+                     film_cond=None,
+                     sampling_seed=None):
         t, weights = self.schedule_sampler.sample(input_data.shape[0],
                                                   self.device,
                                                   seed=sampling_seed)
+        model_kwargs = dict(guidance_input)
+
+        if self.use_film:
+            if film_cond is None:
+                raise ValueError(
+                    "RAWDiffusionModule: use_film=True but film_cond is None in forward_step()."
+                )
+            model_kwargs["film_cond"] = film_cond.to(input_data.device)
 
         losses, extra = self.diffusion.training_losses(
             self.model,
             input_data,
             t,
-            model_kwargs=guidance_input,
+            model_kwargs=model_kwargs,
             weight_l2=self.params.general.weight_l2,
             weight_l1=self.params.general.weight_l1,
             weight_logl1=self.params.general.weight_logl1,
@@ -92,10 +126,14 @@ class RAWDiffusionModule(LightningModule):
     def training_step(self, batch, batch_idx):
         input_data = batch["raw_data"]
         guidance_data = batch["guidance_data"]
+        camera_id = batch["camera_id"]
 
         guidance_input = self.preprocess_guidance(guidance_data)
+        film_cond = self.process_film_cond(camera_id)
 
-        loss, extra, metrics = self.forward_step(input_data, guidance_input)
+        loss, extra, metrics = self.forward_step(input_data,
+                                                 guidance_input,
+                                                 film_cond=film_cond)
 
         self.log("train_loss",
                  loss,
@@ -152,12 +190,15 @@ class RAWDiffusionModule(LightningModule):
     def validation_step(self, batch, batch_idx):
         input_data = batch["raw_data"]
         guidance_data = batch["guidance_data"]
+        camera_id = batch["camera_id"]
 
         guidance_input = self.preprocess_guidance(guidance_data)
+        film_cond = self.process_film_cond(camera_id)
 
         sampling_seed = 123 + batch_idx
         loss, extra, metrics = self.forward_step(input_data,
                                                  guidance_input,
+                                                 film_cond=film_cond,
                                                  sampling_seed=sampling_seed)
 
         self.log("val_loss",
@@ -215,8 +256,16 @@ class RAWDiffusionModule(LightningModule):
             guidance_data = guidance_data * mask
 
         guidance_input["guidance_data"] = guidance_data
-
         return guidance_input
+
+    def process_film_cond(self, camera_id):
+        if self.use_film and camera_id is not None:
+            cond = F.one_hot(
+                camera_id.long(),
+                num_classes=self.film_cond_channels,
+            ).float()
+            return cond
+        return None
 
     def log_batch_results(self,
                           model_kwargs,
@@ -267,8 +316,17 @@ class RAWDiffusionModule(LightningModule):
     ):
         input_data = batch["raw_data"]
         guidance_data = batch["guidance_data"]
+        camera_id = batch["camera_id"]
 
         guidance_input = self.preprocess_guidance(guidance_data)
+        film_cond = self.process_film_cond(camera_id)
+        model_kwargs = dict(guidance_input)
+        if self.use_film:
+            if film_cond is None:
+                raise ValueError(
+                    "RAWDiffusionModule: use_film=True but film_cond is None in log_sampling_images()."
+                )
+            model_kwargs["film_cond"] = film_cond.to(input_data.device)
 
         bs, _, h, w = input_data.shape
 
@@ -291,7 +349,7 @@ class RAWDiffusionModule(LightningModule):
                 shape,
                 noise=noise,
                 clip_denoised=clip_denoised,
-                model_kwargs=guidance_input,
+                model_kwargs=model_kwargs,
                 progress=False,
             )
 

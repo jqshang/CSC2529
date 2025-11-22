@@ -56,7 +56,7 @@ model:
   conditional_block_name: RGBGuidedResidualBlock
   norm_num_groups: 8
   use_film: False
-  cond_channels: 2 # number of cameras models
+  film_cond_channels: 2 # number of cameras models
 
 diffusion:
   learn_sigma: False
