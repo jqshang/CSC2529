@@ -20,6 +20,7 @@ class RAWControlNet(nn.Module):
         image_size,
         in_channels,
         model_channels,
+        hint_channels,
         num_res_blocks,
         attention_resolutions,
         dropout=0,
@@ -50,6 +51,7 @@ class RAWControlNet(nn.Module):
         for res in attention_resolutions:
             attention_resolutions_ds.append(image_size // int(res))
 
+        self.dims = dims
         self.in_channels = in_channels
         self.model_channels = model_channels
         self.num_res_blocks = num_res_blocks
@@ -94,8 +96,13 @@ class RAWControlNet(nn.Module):
                         padding_mode="reflect"))
         ])
 
-        self.input_zero_convs = nn.ModuleList(
-            [zero_module(conv_nd(dims, ch, ch, 1))])
+        self.input_zero_convs = nn.ModuleList([self.make_zero_conv(ch)])
+
+        self.input_hint_block = TimestepEmbedSequential(
+            conv_nd(dims, hint_channels, ch, 1, padding=0),
+            nn.SiLU(),
+            zero_module(conv_nd(dims, ch, ch, 1, padding=0)),
+        )
 
         if self.use_film:
             from .residual_blocks import FiLMResidualBlock as BaseResBlock
@@ -151,6 +158,8 @@ class RAWControlNet(nn.Module):
             normalization_fn=self.normalization_fn,
         )
 
+        self._feature_size = model_channels
+        input_block_chans = [model_channels]
         ds = 1
         for level, mult in enumerate(channel_mult):
             for _ in range(num_res_blocks):
@@ -165,9 +174,9 @@ class RAWControlNet(nn.Module):
                     layers.append(attention(ch, ))
 
                 self.input_blocks.append(TimestepEmbedSequential(*layers))
-                self.input_zero_convs.append(
-                    zero_module(conv_nd(dims, ch, ch, 1)))
-
+                self.input_zero_convs.append(self.make_zero_conv(ch))
+                self._feature_size += ch
+                input_block_chans.append(ch)
             if level != len(channel_mult) - 1:
                 out_ch = ch
                 self.input_blocks.append(
@@ -179,52 +188,65 @@ class RAWControlNet(nn.Module):
                         ) if resblock_updown else Downsample(
                             ch, conv_resample, dims=dims, out_channels=out_ch))
                 )
-                self.input_zero_convs.append(
-                    zero_module(conv_nd(dims, out_ch, out_ch, 1)))
-
                 ch = out_ch
+                input_block_chans.append(ch)
+                self.input_zero_convs.append(self.make_zero_conv(ch))
                 ds *= 2
+                self._feature_size += ch
 
         self.middle_block = TimestepEmbedSequential(
             resblock_guidance(ch, ),
             (attention(ch) if mid_attention else nn.Identity()),
             resblock_guidance(ch, ),
         )
-        self.middle_zero_conv = zero_module(conv_nd(dims, ch, ch, 1))
+        self.middle_zero_conv = self.make_zero_conv(ch)
+        self._feature_size += ch
 
-    def forward(self, x, timesteps, guidance_features, cond=None):
+    def make_zero_conv(self, channels):
+        return TimestepEmbedSequential(
+            zero_module(conv_nd(self.dims, channels, channels, 1, padding=0)))
+
+    def forward(self, x, hint, timesteps, guidance_features, film_cond=None):
         """
         Args:
             x:                [B, in_channels, H, W] noisy RGB input (same as RAWDiffusion).
+            hint:           [B, hint_channels, H, W] hint input (e.g., RAW hints).
             timesteps:        [B] diffusion timesteps.
             guidance_features:[B, c_channels, H, W] output of frozen rgb_guidance_module.
                                (Already computed once and shared with RAWDiffusionModel.)
-            cond:             [B, film_cond_channels] FiLM condition vector if use_film=True.
+            film_cond:             [B, film_cond] FiLM condition vector if use_film=True.
         """
 
-        if self.use_film and cond is None:
+        if self.use_film and film_cond is None:
             raise ValueError(
-                "RAWControlNet is configured with use_film=True, but no cond was passed to forward()."
+                "RAWControlNet is configured with use_film=True, but no film_cond was passed to forward()."
             )
 
-        hs = []
         emb = self.time_embed(
             timestep_embedding(timesteps, self.model_channels))
+        guided_hint = self.input_hint_block(hint, emb)
+
+        hs = []
 
         h = x.type(self.dtype)
         for block, zero_conv in zip(self.input_blocks, self.input_zero_convs):
             if self.use_film:
-                h = block(h, guidance_features, emb, cond)
+                h = block(h, guidance_features, emb, film_cond)
             else:
                 h = block(h, guidance_features, emb)
-            hs.append(zero_conv(h))
+
+            if guided_hint is not None:
+                h = h + guided_hint
+                guided_hint = None  # only add once at the first block
+
+            hs.append(zero_conv(h, emb))
 
         if self.use_film:
-            h = self.middle_block(h, guidance_features, emb, cond)
+            h = self.middle_block(h, guidance_features, emb, film_cond)
         else:
             h = self.middle_block(h, guidance_features, emb)
 
-        middle_block_res = self.middle_zero_conv(h)
+        middle_block_res = self.middle_zero_conv(h, emb)
 
         return {
             "input_block_res": hs,
@@ -245,12 +267,12 @@ class RAWDiffusionWithControlNet(nn.Module):
         self.controlnet = controlnet
         self.controlnet_scale = controlnet_scale
 
-    def forward(self, x, timesteps, guidance_data, cond=None, **kwargs):
+    def forward(self, x, timesteps, guidance_data, film_cond=None, **kwargs):
         return self.backbone(
             x,
             timesteps,
             guidance_data=guidance_data,
-            cond=cond,
+            film_cond=film_cond,
             controlnet=self.controlnet,
             controlnet_scale=self.controlnet_scale,
         )
