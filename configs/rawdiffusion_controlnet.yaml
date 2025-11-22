@@ -29,7 +29,6 @@ general:
   
   seed: 0
   image_size: 256
-  num_cameras: 2 # number of cameras models
   backbone_ckpt: ./checkpoint/last.ckpt
 
 model:
