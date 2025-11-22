@@ -31,6 +31,7 @@ from rawdiffusion.gaussian_diffusion_factory import (
 from rawdiffusion.utils import get_output_path
 from rawdiffusion.config import mod_config
 from rawdiffusion.utils import rggb_to_rgb
+from rawdiffusion.models.rawdiffusion import RAWDiffusionModel
 
 
 class RAWDiffusionModule(LightningModule):
@@ -54,7 +55,8 @@ class RAWDiffusionModule(LightningModule):
                     "use_film=True but `model.film_cond_channels` is not set in the config."
                 )
 
-        self.model = instantiate(self.params.model, image_size=image_size)
+        self.model: RAWDiffusionModel = instantiate(self.params.model,
+                                                    image_size=image_size)
         self.diffusion = create_gaussian_diffusion(**self.params.diffusion)
         self.diffusion_val = create_gaussian_diffusion(
             **self.params.diffusion_val)

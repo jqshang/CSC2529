@@ -203,8 +203,8 @@ class RAWControlNet(nn.Module):
         self._feature_size += ch
 
     def make_zero_conv(self, channels):
-        return TimestepEmbedSequential(
-            zero_module(conv_nd(self.dims, channels, channels, 1, padding=0)))
+        return zero_module(conv_nd(self.dims, channels, channels, 1,
+                                   padding=0))
 
     def forward(self, x, hint, timesteps, guidance_features, film_cond=None):
         """
@@ -216,7 +216,6 @@ class RAWControlNet(nn.Module):
                                (Already computed once and shared with RAWDiffusionModel.)
             film_cond:             [B, film_cond] FiLM condition vector if use_film=True.
         """
-
         if self.use_film and film_cond is None:
             raise ValueError(
                 "RAWControlNet is configured with use_film=True, but no film_cond was passed to forward()."
@@ -224,7 +223,7 @@ class RAWControlNet(nn.Module):
 
         emb = self.time_embed(
             timestep_embedding(timesteps, self.model_channels))
-        guided_hint = self.input_hint_block(hint, emb)
+        guided_hint = self.input_hint_block(hint, None, emb)
 
         hs = []
 
@@ -239,14 +238,14 @@ class RAWControlNet(nn.Module):
                 h = h + guided_hint
                 guided_hint = None  # only add once at the first block
 
-            hs.append(zero_conv(h, emb))
+            hs.append(zero_conv(h))
 
         if self.use_film:
             h = self.middle_block(h, guidance_features, emb, film_cond)
         else:
             h = self.middle_block(h, guidance_features, emb)
 
-        middle_block_res = self.middle_zero_conv(h, emb)
+        middle_block_res = self.middle_zero_conv(h)
 
         return {
             "input_block_res": hs,

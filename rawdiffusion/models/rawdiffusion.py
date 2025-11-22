@@ -256,6 +256,16 @@ class RAWDiffusionModel(nn.Module):
         for p in self.parameters():
             p.requires_grad_(False)
 
+    @staticmethod
+    def make_camera_hint_from_film_cond(film_cond: torch.Tensor,
+                                        x: torch.Tensor):
+        if film_cond is None:
+            return None
+
+        film_cond = film_cond.to(device=x.device, dtype=x.dtype)
+        B, _, H, W = x.shape
+        return film_cond[..., None, None].expand(B, film_cond.shape[1], H, W)
+
     def forward(
         self,
         x,
@@ -290,6 +300,7 @@ class RAWDiffusionModel(nn.Module):
         if controlnet is not None:
             control_out = controlnet(
                 x=x,
+                hint=self.make_camera_hint_from_film_cond(film_cond, x),
                 timesteps=timesteps,
                 guidance_features=guidance_features,
                 film_cond=film_cond,

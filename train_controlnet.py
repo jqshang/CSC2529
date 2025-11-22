@@ -50,11 +50,11 @@ class RAWDiffusionModule(LightningModule):
         self.use_film = False
         if "use_film" in self.params.model:
             self.use_film = bool(self.params.model.use_film)
-            self.film_cond_channels = self.params.model.film_cond_channels
-            if self.film_cond_channels is None:
-                raise ValueError(
-                    "use_film=True but `model.film_cond_channels` is not set in the config."
-                )
+        self.film_cond_channels = self.params.model.film_cond_channels
+        if self.film_cond_channels is None:
+            raise ValueError(
+                "use_film=True but `model.film_cond_channels` is not set in the config."
+            )
 
         backbone: RAWDiffusionModel = instantiate(self.params.model,
                                                   image_size=image_size)
@@ -78,27 +78,8 @@ class RAWDiffusionModule(LightningModule):
             print("Backbone loaded. Missing keys:", missing)
             print("Backbone loaded. Unexpected keys:", unexpected)
 
-        controlnet = RAWControlNet(
-            image_size=image_size,
-            in_channels=in_channels,
-            model_channels=self.params.model.model_channels,
-            hint_channels=self.params.model.hint_channels,
-            num_res_blocks=self.params.model.num_res_blocks,
-            attention_resolutions=self.params.model.attention_resolutions,
-            channel_mult=self.params.model.channel_mult,
-            dropout=self.params.model.dropout,
-            use_checkpoint=self.params.model.use_checkpoint,
-            use_scale_shift_norm=self.params.model.use_scale_shift_norm,
-            resblock_updown=self.params.model.resblock_updown,
-            use_new_attention_order=self.params.model.use_new_attention_order,
-            mid_attention=self.params.model.mid_attention,
-            c_channels=self.params.model.c_channels,
-            use_film=self.params.model.use_film,
-            film_cond_channels=self.params.model.film_cond_channels,
-            conditional_block_name=self.params.model.conditional_block_name,
-            norm_num_groups=self.params.model.norm_num_groups,
-        )
-
+        controlnet: RAWControlNet = instantiate(self.params.controlnet,
+                                                image_size=image_size)
         controlnet.load_state_dict(backbone.state_dict(), strict=False)
         for name, p in backbone.named_parameters():
             p.requires_grad_(False)
@@ -155,13 +136,12 @@ class RAWDiffusionModule(LightningModule):
                                                   seed=sampling_seed)
 
         model_kwargs = dict(guidance_input)
-
-        if self.use_film:
-            if film_cond is None:
-                raise ValueError(
-                    "RAWDiffusionModule: use_film=True but film_cond is None in forward_step()."
-                )
-            model_kwargs["film_cond"] = film_cond.to(input_data.device)
+        # if self.use_film:
+        if film_cond is None:
+            raise ValueError(
+                "RAWDiffusionModule: use_film=True but film_cond is None in forward_step()."
+            )
+        model_kwargs["film_cond"] = film_cond.to(input_data.device)
 
         losses, extra = self.diffusion.training_losses(
             self.model,
@@ -314,7 +294,8 @@ class RAWDiffusionModule(LightningModule):
         return guidance_input
 
     def process_film_cond(self, camera_id):
-        if self.use_film and camera_id is not None:
+        # if self.use_film and camera_id is not None:
+        if camera_id is not None:
             cond = F.one_hot(
                 camera_id.long(),
                 num_classes=self.film_cond_channels,
@@ -376,12 +357,12 @@ class RAWDiffusionModule(LightningModule):
         guidance_input = self.preprocess_guidance(guidance_data)
         film_cond = self.process_film_cond(camera_id)
         model_kwargs = dict(guidance_input)
-        if self.use_film:
-            if film_cond is None:
-                raise ValueError(
-                    "RAWDiffusionModule: use_film=True but film_cond is None in log_sampling_images()."
-                )
-            model_kwargs["film_cond"] = film_cond.to(input_data.device)
+        # if self.use_film:
+        if film_cond is None:
+            raise ValueError(
+                "RAWDiffusionModule: use_film=True but film_cond is None in log_sampling_images()."
+            )
+        model_kwargs["film_cond"] = film_cond.to(input_data.device)
 
         bs, _, h, w = input_data.shape
 
