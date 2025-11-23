@@ -38,7 +38,8 @@ def get_val_output_name(cfg):
     output_name = cfg.dataset.val.data_dir
     output_name = os.path.basename(os.path.normpath(output_name))
 
-    file_list_name = os.path.splitext(os.path.basename(cfg.dataset.val.file_list))[0]
+    file_list_name = os.path.splitext(
+        os.path.basename(cfg.dataset.val.file_list))[0]
     output_name += "_" + file_list_name
 
     if cfg.diffusion_val.timestep_respacing:
@@ -47,9 +48,9 @@ def get_val_output_name(cfg):
     return output_name
 
 
-@hydra.main(
-    version_base="1.3", config_path="configs", config_name="rawdiffusion_sample"
-)
+@hydra.main(version_base="1.3",
+            config_path="configs",
+            config_name="rawdiffusion_sample")
 def main(cfg: DictConfig) -> None:
     mod_config(cfg)
     OmegaConf.resolve(cfg)
@@ -58,9 +59,8 @@ def main(cfg: DictConfig) -> None:
     experiment_folder = get_output_path(cfg)
     print(f"experiment_folder: {experiment_folder}")
 
-    checkpoint_path = os.path.join(
-        experiment_folder, "checkpoints", cfg.checkpoint_name
-    )
+    checkpoint_path = os.path.join(experiment_folder, "checkpoints",
+                                   cfg.checkpoint_name)
     print(f"checkpoint_path: {checkpoint_path}")
 
     output_name = get_val_output_name(cfg)
@@ -75,14 +75,15 @@ def main(cfg: DictConfig) -> None:
         experiment_folder=experiment_folder,
         **cfg,
     )
-    
+
     with torch.serialization.safe_globals([DictConfig]):
-        checkpoint = torch.load(checkpoint_path, map_location="cuda", weights_only=False)
+        checkpoint = torch.load(checkpoint_path,
+                                map_location="cuda",
+                                weights_only=False)
 
     state = state = checkpoint["state_dict"]
     raw_module.load_state_dict(state)
     raw_module.cuda()
-
 
     data_val = create_dataset(
         **cfg.dataset.val,
@@ -91,9 +92,8 @@ def main(cfg: DictConfig) -> None:
     )
     raw_module.eval()
 
-    image_path = os.path.join(
-        experiment_folder, "inference_sampling", output_name, "visualizations"
-    )
+    image_path = os.path.join(experiment_folder, "inference_sampling",
+                              output_name, "visualizations")
     os.makedirs(image_path, exist_ok=True)
     inference_output_path = os.path.join(
         experiment_folder,
@@ -102,25 +102,25 @@ def main(cfg: DictConfig) -> None:
     )
     os.makedirs(inference_output_path, exist_ok=True)
 
-    config_path = os.path.join(
-        experiment_folder, "inference_sampling", output_name, "config.yaml"
-    )
-    metric_path = os.path.join(
-        experiment_folder, "inference_sampling", output_name, "metric.yaml"
-    )
+    config_path = os.path.join(experiment_folder, "inference_sampling",
+                               output_name, "config.yaml")
+    metric_path = os.path.join(experiment_folder, "inference_sampling",
+                               output_name, "metric.yaml")
 
-    metrics_sampling = CollectionMetric(
-        {
-            # "mse_rggb": MSEMetric(),
-            # "psnr_rggb": PSNRMetric(),
-            # "ssim_rggb": SSIMMetric(),
-            # "pearson_rggb": PearsonMetric(),
-            "mse_rgb": MSEMetric(rggb_to_rgb=True),
-            "psnr_rgb": PSNRMetric(rggb_to_rgb=True),
-            "ssim_rgb": SSIMMetric(rggb_to_rgb=True),
-            "pearson_rgb": PearsonMetric(rggb_to_rgb=True),
-        }
-    )
+    metrics_sampling = CollectionMetric({
+        # "mse_rggb": MSEMetric(),
+        # "psnr_rggb": PSNRMetric(),
+        # "ssim_rggb": SSIMMetric(),
+        # "pearson_rggb": PearsonMetric(),
+        "mse_rgb":
+        MSEMetric(rggb_to_rgb=True),
+        "psnr_rgb":
+        PSNRMetric(rggb_to_rgb=True),
+        "ssim_rgb":
+        SSIMMetric(rggb_to_rgb=True),
+        "pearson_rgb":
+        PearsonMetric(rggb_to_rgb=True),
+    })
 
     diffusion = create_gaussian_diffusion(**cfg.diffusion_val)
 
@@ -138,20 +138,22 @@ def main(cfg: DictConfig) -> None:
     model = raw_module.model
 
     with Progress(
-        TextColumn("[progress.description]{task.description}"),
-        BarColumn(),
-        TaskProgressColumn(),
-        TextColumn("PSNR: {task.fields[psnr_rgb]}"),
-        TextColumn("SSIM: {task.fields[ssim_rgb]}"),
-        TextColumn("{task.completed}/{task.total}"),
-        TimeRemainingColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            TaskProgressColumn(),
+            TextColumn("PSNR: {task.fields[psnr_rgb]}"),
+            TextColumn("SSIM: {task.fields[ssim_rgb]}"),
+            TextColumn("{task.completed}/{task.total}"),
+            TimeRemainingColumn(),
     ) as progress:
-        task_total_id = progress.add_task(
-            "[red]Total Dataset", total=len(data_val), psnr_rgb="", ssim_rgb=""
-        )
-        task_batch_id = progress.add_task(
-            "[green]Batch", total=100, psnr_rgb="", ssim_rgb=""
-        )
+        task_total_id = progress.add_task("[red]Total Dataset",
+                                          total=len(data_val),
+                                          psnr_rgb="",
+                                          ssim_rgb="")
+        # task_batch_id = progress.add_task("[green]Batch",
+        #                                   total=100,
+        #                                   psnr_rgb="",
+        #                                   ssim_rgb="")
         task_total = progress._tasks[task_total_id]
 
         print("sampling...")
@@ -160,43 +162,51 @@ def main(cfg: DictConfig) -> None:
         for batch in data_val:
             raw_data = batch["raw_data"].cuda()
             guidance_data = batch["guidance_data"].cuda()
+            camera_id = batch["camera_id"].cuda()
 
             guidance_input = raw_module.preprocess_guidance(guidance_data)
+            film_cond = raw_module.process_film_cond(camera_id)
             guidance_input = {k: v.cuda() for k, v in guidance_input.items()}
+            model_kwargs = dict(guidance_input)
+            if raw_module.use_film:
+                if film_cond is None:
+                    raise ValueError(
+                        "RAWDiffusionModule: use_film=True but film_cond is None in log_sampling_images()."
+                    )
+                model_kwargs["film_cond"] = film_cond.cuda()
 
-            progress.reset(task_batch_id, total=diffusion.num_timesteps)
+            # progress.reset(task_batch_id, total=diffusion.num_timesteps)
 
             ts = diffusion.num_timesteps - 1
             noise = torch.randn_like(raw_data)
 
             indices = list(range(ts))[::-1]
-            sample_fn_progressive = (
-                diffusion.p_sample_loop_progressive
-                if not use_ddim
-                else diffusion.ddim_sample_loop_progressive
-            )
+            sample_fn_progressive = (diffusion.p_sample_loop_progressive
+                                     if not use_ddim else
+                                     diffusion.ddim_sample_loop_progressive)
 
             vis_step = max(1, diffusion.num_timesteps // 8)
             samples = []
 
             with torch.inference_mode():
                 for sample_dict in sample_fn_progressive(
-                    model,
-                    shape=(
-                        guidance_data.shape[0],
-                        3,
-                        guidance_data.shape[2],
-                        guidance_data.shape[3],
-                    ),
-                    noise=noise,
-                    clip_denoised=clip_denoised,
-                    denoised_fn=None,
-                    cond_fn=None,
-                    model_kwargs=guidance_input,
-                    device=None,
-                    progress=False,
-                    progress_fn=lambda: progress.advance(task_batch_id, advance=1),
-                    indices=indices,
+                        model,
+                        shape=(
+                            guidance_data.shape[0],
+                            3,
+                            guidance_data.shape[2],
+                            guidance_data.shape[3],
+                        ),
+                        noise=noise,
+                        clip_denoised=clip_denoised,
+                        denoised_fn=None,
+                        cond_fn=None,
+                        model_kwargs=model_kwargs,
+                        device=None,
+                        progress=False,
+                        # progress_fn=lambda: progress.advance(task_batch_id,
+                        #                                      advance=1),
+                        indices=indices,
                 ):
                     sample_t = sample_dict["t"]
                     sample = sample_dict["sample"]
@@ -240,24 +250,22 @@ def main(cfg: DictConfig) -> None:
                     create_folder_for_file(gt_data_path)
                     if not rgb_only:
                         tv.utils.save_image(batch_rgb_gc[j], gt_data_path)
+                    tv.utils.save_image(sample_rgb_gc[j],
+                                        os.path.join(image_path, fn + ".png"))
                     tv.utils.save_image(
-                        sample_rgb_gc[j], os.path.join(image_path, fn + ".png")
-                    )
-                    tv.utils.save_image(
-                        guidance_data[j], os.path.join(image_path, fn + "_rgb.png")
-                    )
+                        guidance_data[j],
+                        os.path.join(image_path, fn + "_rgb.png"))
 
                     if save_timesteps:
                         for t, s in enumerate(samples_rgb_gc):
                             tv.utils.save_image(
-                                s[j], os.path.join(image_path, f"{fn}_{t}.png")
-                            )
+                                s[j], os.path.join(image_path,
+                                                   f"{fn}_{t}.png"))
 
                 if save_pred:
                     if save_as_hdf5:
-                        pred_np_path = os.path.join(
-                            inference_output_path, fn + "_pred_u16.hdf5"
-                        )
+                        pred_np_path = os.path.join(inference_output_path,
+                                                    fn + "_pred_u16.hdf5")
                         create_folder_for_file(pred_np_path)
                         sample_data = sample_np[j].transpose(1, 2, 0)
                         sample_data = (sample_data * 65535).astype(np.uint16)
@@ -269,9 +277,8 @@ def main(cfg: DictConfig) -> None:
                                 compression_opts=9,
                             )
                     else:
-                        pred_np_path = os.path.join(
-                            inference_output_path, fn + "_pred.npy"
-                        )
+                        pred_np_path = os.path.join(inference_output_path,
+                                                    fn + "_pred.npy")
                         create_folder_for_file(pred_np_path)
                         np.save(pred_np_path, sample_np[j].transpose(1, 2, 0))
 
