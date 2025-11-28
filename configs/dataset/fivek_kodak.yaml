@@ -1,0 +1,4 @@
+defaults:
+- train: fivek_kodak
+- val: fivek_kodak
+- _self_

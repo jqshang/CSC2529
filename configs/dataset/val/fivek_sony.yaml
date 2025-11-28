@@ -1,0 +1,8 @@
+defaults:
+- base
+- _self_
+
+data_dir: ./data/fivek_dataset_processed/fivek_patches_3/
+camera_name: DSLR-A900
+file_list: DSLR-A900_test.txt
+batch_size: 4

@@ -1,0 +1,4 @@
+defaults:
+- train: fivek_leica
+- val: fivek_leica
+- _self_

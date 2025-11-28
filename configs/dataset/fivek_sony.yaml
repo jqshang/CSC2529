@@ -1,0 +1,4 @@
+defaults:
+- train: fivek_sony
+- val: fivek_sony
+- _self_
