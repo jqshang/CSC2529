@@ -27,12 +27,12 @@ args = parser.parse_args()
 raw_source_root = args.raw_source_root
 save_folder_root = args.save_folder_root
 
-# model_names = [
-#     "NIKON D70",
-#     "Canon EOS 5D",
-# ]
+model_names = [
+    "NIKON D700",
+    # "Canon EOS 5D",
+]
 
-model_names = ['Canon EOS 10D', 'Canon EOS 20D', 'Canon EOS 30D', 'Canon EOS 40D', 'Canon EOS 5D', 'Canon EOS 5D Mark II', 'Canon EOS D30', 'Canon EOS D60', 'Canon EOS DIGITAL REBEL XSi', 'Canon EOS DIGITAL REBEL XT', 'Canon EOS DIGITAL REBEL XTi', 'Canon EOS-1D Mark II', 'Canon PowerShot G10', 'Canon PowerShot G9', 'Canon PowerShot S70', 'D-LUX 3', 'DCS460D         FILE VERSION 3', 'DSLR-A900', 'FinePixS2Pro', 'M8 Digital Camera', 'NIKON D100', 'NIKON D200', 'NIKON D2H', 'NIKON D300', 'NIKON D40X', 'NIKON D70', 'NIKON D700', 'NIKON D70s', 'NIKON D80']
+# model_names = ['Canon EOS 10D', 'Canon EOS 20D', 'Canon EOS 30D', 'Canon EOS 40D', 'Canon EOS 5D', 'Canon EOS 5D Mark II', 'Canon EOS D30', 'Canon EOS D60', 'Canon EOS DIGITAL REBEL XSi', 'Canon EOS DIGITAL REBEL XT', 'Canon EOS DIGITAL REBEL XTi', 'Canon EOS-1D Mark II', 'Canon PowerShot G10', 'Canon PowerShot G9', 'Canon PowerShot S70', 'D-LUX 3', 'DCS460D         FILE VERSION 3', 'DSLR-A900', 'FinePixS2Pro', 'M8 Digital Camera', 'NIKON D100', 'NIKON D200', 'NIKON D2H', 'NIKON D300', 'NIKON D40X', 'NIKON D70', 'NIKON D700', 'NIKON D70s', 'NIKON D80']
 
 # Folder containing processed data
 
@@ -49,7 +49,8 @@ if os.path.exists(processed_root):
     # Remove already processed cameras
     for folder in processed_folders:
         # Remove _train_raw or _test_raw suffix
-        folder_clean = folder.replace("_train_raw", "").replace("_test_raw", "")
+        folder_clean = folder.replace("_train_raw",
+                                      "").replace("_test_raw", "")
         if folder_clean in model_names_folder:
             idx = model_names_folder.index(folder_clean)
             # Remove both the folder-style and the original model name
@@ -57,7 +58,6 @@ if os.path.exists(processed_root):
             model_names.pop(idx)
 
     print("Remaining models to process:", model_names)
-
 
 raw_file_extensions = [".dng"]
 
@@ -213,8 +213,8 @@ for camera_model in model_names:
     raw_files = raw_files_per_camera[camera_model]
     raw_files.sort(key=lambda x: x.raw_path)
     if len(raw_files) <= 1:
-      print(f"{len(raw_files)} images, continue.")
-      continue
+        print(f"{len(raw_files)} images, continue.")
+        continue
     print(f"{len(raw_files)} images")
 
     train_raw_files, test_raw_files = train_test_split(raw_files,

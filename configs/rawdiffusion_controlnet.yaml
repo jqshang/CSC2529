@@ -30,6 +30,8 @@ general:
   seed: 0
   image_size: 256
   backbone_ckpt: ./checkpoint/last.ckpt
+  expr_folder: ./experiments
+  expr_model: "RD"
 
 model:
   _target_: rawdiffusion.models.rawdiffusion.RAWDiffusionModel

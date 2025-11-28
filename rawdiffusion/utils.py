@@ -14,9 +14,7 @@ def rggb_to_rgb(data):
     return t
 
 
-def rgb_to_rggb(
-    data,
-):
+def rgb_to_rggb(data, ):
     r, g, b = torch.chunk(data, 3, dim=1)
     t = torch.cat(
         [r, g, g, b],
@@ -77,10 +75,11 @@ def get_output_path(args):
     model_name = args.model._target_.split(".")[-1]
     model_params = args.model
     rgb_guidance_module_args = args.model.rgb_guidance_module
-    rgb_guidance_module_key = get_rgb_guidance_module_key(rgb_guidance_module_args)
-    train_split = os.path.splitext(os.path.basename(args.dataset.train.file_list))[
-        0
-    ].replace("_train", "")
+    rgb_guidance_module_key = get_rgb_guidance_module_key(
+        rgb_guidance_module_args)
+    train_split = os.path.splitext(
+        os.path.basename(args.dataset.train.file_list))[0].replace(
+            "_train", "")
 
     if args.dataset.train.max_items is not None:
         mi = args.dataset.train.max_items
@@ -91,8 +90,7 @@ def get_output_path(args):
         os.path.basename(os.path.normpath(args.dataset.train.data_dir)),
         train_split,
         f"R{args.dataset.train.resample_dataset_size}"
-        if args.dataset.train.resample_dataset_size is not None
-        else None,
+        if args.dataset.train.resample_dataset_size is not None else None,
         args.general.image_size,
         args.dataset.train.batch_size,
         f"{args.general.max_steps // 1000}k",
@@ -108,25 +106,24 @@ def get_output_path(args):
         args.model.num_res_blocks,
         args.model.norm_num_groups,
         "A" + parts_to_str(args.model.attention_resolutions, "-")
-        if args.model.attention_resolutions
-        else "noatt",
+        if args.model.attention_resolutions else "noatt",
         "d{:.1f}".format(args.general.drop_rate)
-        if args.general.drop_rate > 0.0
-        else None,
+        if args.general.drop_rate > 0.0 else None,
         "ld{:.1f}".format(args.model.latent_drop_rate)
-        if args.model.latent_drop_rate > 0.0
-        else None,
+        if args.model.latent_drop_rate > 0.0 else None,
         rgb_guidance_module_key,
         model_params.conditional_block_name
-        if model_params.conditional_block_name != "RGBGuidedResidualBlock"
-        else None,
+        if model_params.conditional_block_name != "RGBGuidedResidualBlock" else
+        None,
         "midatt" if args.model.mid_attention else None,
-        f"l2{args.general.weight_l2}" if args.general.weight_l2 > 0.0 else None,
-        f"l1{args.general.weight_l1}" if args.general.weight_l1 > 0.0 else None,
+        f"l2{args.general.weight_l2}"
+        if args.general.weight_l2 > 0.0 else None,
+        f"l1{args.general.weight_l1}"
+        if args.general.weight_l1 > 0.0 else None,
         f"logl1{args.general.weight_logl1}"
-        if args.general.weight_logl1 > 0.0
-        else None,
-        f"wd{args.general.weight_decay}" if args.general.weight_decay > 0.0 else None,
+        if args.general.weight_logl1 > 0.0 else None,
+        f"wd{args.general.weight_decay}"
+        if args.general.weight_decay > 0.0 else None,
         args.general.lr_scheduler,
         "bl" if args.general.min_mode == "black_level" else "mv",
         "tanh" if args.model.out_tanh else None,
@@ -136,3 +133,20 @@ def get_output_path(args):
 
     experiment_name = parts_to_str(parts)
     return os.path.join("experiments", experiment_name)
+
+
+def get_output_path_cfg(args):
+    expr_folder = args.general.expr_folder
+    expr_model = args.general.expr_model
+    camera_name = args.dataset.train.camera_name
+    use_film = args.model.use_film
+    num_cameras = args.model.film_cond_channel
+
+    parts = [
+        expr_model,
+        camera_name,
+        "film" if use_film else "nofilm",
+        f"nc{num_cameras}",
+    ]
+
+    return os.path.join(expr_folder, parts_to_str(parts))

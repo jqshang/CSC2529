@@ -28,7 +28,7 @@ from rawdiffusion.evaluation.metrics import (
 from rawdiffusion.resample import create_named_schedule_sampler
 from rawdiffusion.gaussian_diffusion_factory import (
     create_gaussian_diffusion, )
-from rawdiffusion.utils import get_output_path
+from rawdiffusion.utils import get_output_path_cfg
 from rawdiffusion.config import mod_config
 from rawdiffusion.utils import rggb_to_rgb
 from rawdiffusion.models.rawdiffusion import RAWDiffusionModel
@@ -49,11 +49,10 @@ class RAWDiffusionModule(LightningModule):
         self.use_film = False
         if "use_film" in self.params.model:
             self.use_film = bool(self.params.model.use_film)
-            self.film_cond_channels = self.params.model.film_cond_channels
-            if self.film_cond_channels is None:
-                raise ValueError(
-                    "use_film=True but `model.film_cond_channels` is not set in the config."
-                )
+        self.film_cond_channels = self.params.model.film_cond_channels
+        if self.film_cond_channels is None:
+            raise ValueError(
+                "`model.film_cond_channels` is not set in the config.")
 
         self.model: RAWDiffusionModel = instantiate(self.params.model,
                                                     image_size=image_size)
@@ -103,12 +102,12 @@ class RAWDiffusionModule(LightningModule):
                                                   seed=sampling_seed)
         model_kwargs = dict(guidance_input)
 
-        if self.use_film:
-            if film_cond is None:
-                raise ValueError(
-                    "RAWDiffusionModule: use_film=True but film_cond is None in forward_step()."
-                )
-            model_kwargs["film_cond"] = film_cond.to(input_data.device)
+        # if self.use_film:
+        if film_cond is None:
+            raise ValueError(
+                "RAWDiffusionModule: use_film=True but film_cond is None in forward_step()."
+            )
+        model_kwargs["film_cond"] = film_cond.to(input_data.device)
 
         losses, extra = self.diffusion.training_losses(
             self.model,
@@ -323,12 +322,12 @@ class RAWDiffusionModule(LightningModule):
         guidance_input = self.preprocess_guidance(guidance_data)
         film_cond = self.process_film_cond(camera_id)
         model_kwargs = dict(guidance_input)
-        if self.use_film:
-            if film_cond is None:
-                raise ValueError(
-                    "RAWDiffusionModule: use_film=True but film_cond is None in log_sampling_images()."
-                )
-            model_kwargs["film_cond"] = film_cond.to(input_data.device)
+        # if self.use_film:
+        if film_cond is None:
+            raise ValueError(
+                "RAWDiffusionModule: use_film=True but film_cond is None in log_sampling_images()."
+            )
+        model_kwargs["film_cond"] = film_cond.to(input_data.device)
 
         bs, _, h, w = input_data.shape
 
@@ -430,8 +429,9 @@ def main(cfg: DictConfig) -> None:
 
     pl.seed_everything(cfg.general.seed)
 
-    experiment_folder = get_output_path(cfg)
+    experiment_folder = get_output_path_cfg(cfg)
     print(f"experiment_folder: {experiment_folder}")
+    raise
 
     os.makedirs(experiment_folder, exist_ok=True)
     hparams_json = OmegaConf.to_container(cfg, resolve=True)
