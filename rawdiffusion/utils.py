@@ -140,7 +140,7 @@ def get_output_path_cfg(args):
     expr_model = args.general.expr_model
     camera_name = args.dataset.train.camera_name
     use_film = args.model.use_film
-    num_cameras = args.model.film_cond_channel
+    num_cameras = args.model.film_cond_channels
 
     parts = [
         expr_model,
