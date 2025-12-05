@@ -431,7 +431,6 @@ def main(cfg: DictConfig) -> None:
 
     experiment_folder = get_output_path_cfg(cfg)
     print(f"experiment_folder: {experiment_folder}")
-    raise
 
     os.makedirs(experiment_folder, exist_ok=True)
     hparams_json = OmegaConf.to_container(cfg, resolve=True)
