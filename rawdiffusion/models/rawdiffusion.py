@@ -344,6 +344,12 @@ class RAWDiffusionModel(nn.Module):
                 skip = skip + controlnet_scale * control_input_res[control_idx]
                 control_idx -= 1
 
+            if h.shape[2:] != skip.shape[2:]:
+                H = min(h.shape[2], skip.shape[2])
+                W = min(h.shape[3], skip.shape[3])
+                h = h[:, :, :H, :W]
+                skip = skip[:, :, :H, :W]
+
             h = th.cat([h, skip], dim=1)
 
             if self.use_film:
